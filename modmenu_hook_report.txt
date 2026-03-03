@@ -94,37 +94,75 @@ Current LSPosed module implementation mapping
   - kEntityBaseTypeOffset = 0x1184
   - kEntityTypeHero = 1
 
-How to update for future game versions
-1) Dump new IL2CPP metadata
-   - Generate fresh Il2CppDumper output (dump.cs + script.json) for the new APK version.
-2) Re-locate hooked methods
-   - Find new RVA for EntityData$$GetHeadShot.
-   - Find new RVA for EntityData$$GetMiss.
-3) Re-verify side fields
-   - Confirm EntityData.m_Entity offset in dump.cs.
-   - Confirm EntityBase.m_Type offset in dump.cs.
-   - Confirm EntityType.Hero enum value.
-4) Update native constants in archero_mod/app/src/main/cpp/mod.cpp
-   - Update GetHeadShot/GetMiss RVA constants.
-   - Update field offsets if changed.
-   - Keep side-aware branch logic the same unless game logic changes.
-5) Rebuild and test
-   - Build: ./gradlew assembleDebug
-   - Install module, enable in LSPosed, scope to com.habby.archero.
-   - Validate in combat: enemy TTK and player damage behavior.
+COMPREHENSIVE UPDATE GUIDE (single source of truth)
+--------------------------------------------------------------------------------
+Use this flow for future Archero versions:
 
-Quick verification commands (from il2cppdump folder)
-- rg "GetHeadShot|GetMiss" dump.cs
-- rg "m_Entity; // 0x" dump.cs
-- rg "m_Type; // 0x" dump.cs
-- rg "enum EntityType|Hero = 1" dump.cs
-- rg "EntityData\\$\\$GetHeadShot|EntityData\\$\\$GetMiss" script.json
+Step 1: Prepare and dump IL2CPP
+- Obtain the new Archero APK and confirm target package (usually com.habby.archero).
+- Re-run Il2CppDumper for the new libil2cpp.so + global-metadata.dat.
+- Keep:
+  - dump.cs
+  - script.json
+
+Step 2: Re-locate hook targets
+- Find new RVAs for:
+  - EntityData$$GetHeadShot
+  - EntityData$$GetMiss
+- Commands (from il2cppdump folder):
+  - rg "GetHeadShot|GetMiss" dump.cs
+  - rg "EntityData\\$\\$GetHeadShot|EntityData\\$\\$GetMiss" script.json
+
+Step 3: Re-verify side-aware offsets
+- Confirm in dump.cs:
+  - EntityData.m_Entity offset
+  - EntityBase.m_Type offset
+  - EntityType.Hero enum value
+- Commands:
+  - rg "m_Entity; // 0x" dump.cs
+  - rg "m_Type; // 0x" dump.cs
+  - rg "enum EntityType|Hero = " dump.cs
+
+Step 4: Update module source
+- In archero_mod/app/src/main/cpp/mod.cpp:
+  - Update GetHeadShot/GetMiss RVA constants.
+  - Update kEntityDataEntityOffset / kEntityBaseTypeOffset / kEntityTypeHero if changed.
+- Keep side-aware branch logic unless game semantics prove changed.
+
+Step 5: Build, package, and verify native libs
+- cd archero_mod
+- ./gradlew assembleDebug
+- Verify native lib is stored uncompressed (critical for LSPosed loader):
+  - unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
+  - Must show "Stored" (NOT "Defl:N")
+- If compressed:
+  - Add/fix in app/build.gradle:
+    packaging {
+      jniLibs {
+        useLegacyPackaging = false
+      }
+    }
+
+Step 6: Deploy and validate
+- Install rebuilt app-debug.apk (replace old module APK).
+- LSPosed: enable module, scope com.habby.archero.
+- Force-stop Archero, relaunch.
+- Validate behavior:
+  - Enemy side: headshots should be forced
+  - Hero side: misses should be forced
+
+Step 7: Troubleshooting when something breaks
+- Export LSPosed logs.
+- If UnsatisfiedLinkError appears -> re-check Step 5 (Stored vs Defl:N).
+- If crashes or no effect -> re-check Steps 2–4 (RVAs, offsets, hero enum).
+- If both sides are altered incorrectly, verify side detection offsets first.
 
 Known failure modes after app updates
 - Wrong method RVA -> hook misses target or crashes.
 - Wrong field offsets -> side detection broken (both sides affected or no effect).
-- Enum changes (Hero value changed) -> side logic inverted or disabled.
-- Stripped/changed IL2CPP layout -> requires fresh reverse pass before release.
+- Hero enum changes -> side logic inverted or disabled.
+- Packed/compressed .so -> UnsatisfiedLinkError on startup.
+- Stripped or changed IL2CPP layout -> requires new reverse pass before release.
 
 ================================================================================
 LSPOSED MODULE: SUCCESS CONFIRMATION & PACKAGING REQUIREMENTS
@@ -151,60 +189,3 @@ VERIFY after every build:
   unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
   # Must show "Stored" NOT "Defl:N"
 
-================================================================================
-FULL DETAILED GUIDE: UPDATING FOR FUTURE GAME VERSIONS
-================================================================================
-
-STEP 1: Prepare new game APK
-- Obtain the new Archero APK version.
-- Confirm package name (usually com.habby.archero).
-
-STEP 2: Dump IL2CPP metadata
-- Use Il2CppDumper on the new APK's libil2cpp.so + global-metadata.dat.
-- Output folder: diffwork/il2cppdump (or equivalent).
-- You need: dump.cs, script.json.
-
-STEP 3: Re-locate hooked methods
-  cd diffwork/il2cppdump
-  grep -E "EntityData\$\$GetHeadShot|EntityData\$\$GetMiss" script.json
-  # Or: grep "GetHeadShot\|GetMiss" dump.cs
-- From script.json, get the new RVA for each method.
-- Update mod.cpp (around hack_thread, il2cpp_base + 0x...):
-    get_headshot_addr = il2cpp_base + 0x???????;  // GetHeadShot RVA
-    get_miss_addr    = il2cpp_base + 0x???????;  // GetMiss RVA
-
-STEP 4: Re-verify side detection offsets
-  grep "m_Entity; // 0x" dump.cs
-  grep "m_Type; // 0x" dump.cs
-  grep "Hero = " dump.cs
-- Update mod.cpp if offsets changed:
-    kEntityDataEntityOffset, kEntityBaseTypeOffset, kEntityTypeHero
-
-STEP 5: Build (DO NOT SKIP PACKAGING CHECK)
-  cd archero_mod
-  ./gradlew assembleDebug
-
-STEP 6: VERIFY native lib is Stored (CRITICAL - prevents UnsatisfiedLinkError)
-  unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
-  # MUST show "Stored". If "Defl:N", add/fix packaging block in app/build.gradle:
-  #   packaging { jniLibs { useLegacyPackaging = false } }
-  # Then rebuild.
-
-STEP 7: Install and test
-- Uninstall old com.archero.mod if present.
-- Install new app-debug.apk.
-- LSPosed: enable module, scope to com.habby.archero.
-- Force-stop Archero, relaunch.
-- Test: enemies one-shot, player invincible.
-
-STEP 8: If module fails to load
-- Export LSPosed logs (LSPosed Manager -> Log).
-- Check for UnsatisfiedLinkError -> re-verify Step 6 (Stored vs Defl:N).
-- Check for hook/crash -> re-verify Steps 3–4 (RVAs and offsets).
-
-PACKAGING CHECKLIST (avoid the "compressed native lib" mistake)
---------------------------------------------------------------------------------
-[ ] app/build.gradle has: packaging { jniLibs { useLegacyPackaging = false } }
-[ ] unzip -l ... | grep libarchero_mod shows "Stored"
-[ ] Do NOT rely on android:extractNativeLibs in manifest (deprecated/unreliable)
-[ ] Compare with working LSPosed modules: their .so entries are Stored
