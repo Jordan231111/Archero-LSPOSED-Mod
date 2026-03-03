@@ -1,0 +1,31 @@
+# Build outputs
+**/build/
+**/bin/
+**/.gradle/
+**/.cxx/
+
+# Extracted game libs (do not commit)
+lib/
+
+# Local config (SDK/NDK paths)
+archero_mod/local.properties
+*.iml
+
+# IDE
+.idea/
+*.iml
+
+# LSPosed debug exports
+LSPosed_*/
+
+# APKs and large binaries
+*.apk
+*.aab
+
+# Il2CppDumper / diffwork output (regenerate per version)
+diffwork/
+tools/
+
+# OS
+.DS_Store
+Thumbs.db
