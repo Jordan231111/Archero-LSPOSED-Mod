@@ -50,4 +50,11 @@ See [modmenu_hook_report.txt](modmenu_hook_report.txt) for:
 
 ## License
 
-Educational / assessment use. Archero is © Habby.
+This repository's code is licensed under `GPL-3.0-only`. See the
+[LICENSE](LICENSE) file for the full text.
+
+Bundled third-party source files keep their own notices; for example,
+`And64InlineHook` remains under MIT in its source headers.
+
+This project does not grant rights to Archero itself or to any Habby-owned
+assets, code, trademarks, or content.
