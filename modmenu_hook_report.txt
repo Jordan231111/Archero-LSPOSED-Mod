@@ -76,23 +76,31 @@ Side-aware behavior model (high-level)
   - Force return true for Hero targets.
   - Call original trampoline for NON-Hero targets / unresolved state.
 
-Side detection fields used (from dump.cs)
+Current side detection fields used (from v7.9.1 dump.cs)
 - EntityData.m_Entity at offset 0x18
   - dump.cs line reference: "protected EntityBase m_Entity; // 0x18"
-- EntityBase.m_Type at offset 0x1184
-  - dump.cs line reference: "protected EntityType m_Type; // 0x1184"
+- EntityBase.m_Type at offset 0x11B4
+  - dump.cs line reference: "protected EntityType m_Type; // 0x11B4"
 - EntityType.Hero enum value = 1
   - dump.cs line reference: "public const EntityType Hero = 1;"
 
 Current LSPosed module implementation mapping
 - Project: /Users/jordan/Documents/temp/archerodecompiled/archero_mod
-- Hook RVAs (v7.7.1):
-  - GetHeadShot: 0x4F68364
-  - GetMiss:     0x4F5B440
+- Hook RVAs (v7.9.1, validated from /Users/jordan/Downloads/Archero_7.9.1_APKPure.xapk):
+  - GetHeadShot: 0x4F7A2E8
+  - GetMiss:     0x4F6D280
+- File offsets in libil2cpp.so:
+  - GetHeadShot: 0x4F762E8
+  - GetMiss:     0x4F69280
 - Side constants currently used in native hook code:
   - kEntityDataEntityOffset = 0x18
-  - kEntityBaseTypeOffset = 0x1184
+  - kEntityBaseTypeOffset = 0x11B4
   - kEntityTypeHero = 1
+- v7.9.1 artifacts used:
+  - Extracted input folder:
+    /Users/jordan/Documents/temp/archerodecompiled/diffwork/archero_7_9_1/input
+  - Il2CppDumper output folder:
+    /Users/jordan/Documents/temp/archerodecompiled/diffwork/archero_7_9_1/il2cppdump
 
 COMPREHENSIVE UPDATE GUIDE (single source of truth)
 --------------------------------------------------------------------------------

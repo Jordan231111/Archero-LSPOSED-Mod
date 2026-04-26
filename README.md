@@ -2,7 +2,7 @@
 
 LSPosed/Xposed module for Archero (com.habby.archero) providing headshot and godmode via IL2CPP hooks.
 
-**Target:** Archero v7.7.1 (arm64-v8a)
+**Target:** Archero v7.9.1 (arm64-v8a)
 
 ## Features
 
@@ -27,6 +27,7 @@ cd archero_mod
 APK output: `archero_mod/app/build/outputs/apk/debug/app-debug.apk`
 
 **Important:** Verify native lib is stored uncompressed:
+
 ```bash
 unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
 # Must show "Stored", not "Defl:N"

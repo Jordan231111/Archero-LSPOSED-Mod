@@ -15,8 +15,18 @@ android {
         
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++11"
+                cppFlags "-std=c++11 -O3 -DNDEBUG"
                 abiFilters "arm64-v8a"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            debuggable false
+            jniDebuggable false
+            ndk {
+                debugSymbolLevel 'NONE'
             }
         }
     }

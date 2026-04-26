@@ -1,5 +1,4 @@
 #include <jni.h>
-#include <android/log.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
@@ -7,12 +6,17 @@
 #include <stdint.h>
 #include "And64InlineHook.hpp"
 
+#if defined(MOD_ENABLE_DEBUG_LOGS) && MOD_ENABLE_DEBUG_LOGS
+#include <android/log.h>
 #define LOG_TAG "ArcheroMod"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGD(...) ((void)0)
+#endif
 
-// Offsets taken from the v7.7.1 IL2CPP dump.
+// Offsets taken from the v7.9.1 IL2CPP dump.
 static constexpr uintptr_t kEntityDataEntityOffset = 0x18;
-static constexpr uintptr_t kEntityBaseTypeOffset = 0x1184;
+static constexpr uintptr_t kEntityBaseTypeOffset = 0x11B4;
 static constexpr int kEntityTypeHero = 1;
 
 using GetHeadShotFn = bool (*)(void* thiz, void* source, void* data, void* method);
@@ -102,8 +106,8 @@ void* hack_thread(void* arg) {
     LOGD("libil2cpp.so found at %p", (void*)il2cpp_base);
 
     // RVAs from report
-    uintptr_t get_headshot_addr = il2cpp_base + 0x4F68364;
-    uintptr_t get_miss_addr = il2cpp_base + 0x4F5B440;
+    uintptr_t get_headshot_addr = il2cpp_base + 0x4F7A2E8;
+    uintptr_t get_miss_addr = il2cpp_base + 0x4F6D280;
 
     LOGD("Hooking EntityData$$GetHeadShot at %p", (void*)get_headshot_addr);
     A64HookFunction(
