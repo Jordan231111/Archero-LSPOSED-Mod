@@ -92,9 +92,9 @@ The default startup set is metadata-first and falls back to AOB/xref/RVA only if
 - `TableTool.PlayerCharacter_UpgradeModel.GetHPMaxBase`: high HP value.
 - `TableTool.Weapon_weapon.get_Speed` and `get_AttackSpeed`: high attack speed.
 - `TableTool.Weapon_weapon.get_bThroughWall`: projectile shoot-through-wall behavior.
-- `MapCreator.DealWater`: early-return while `walk_through_water=1`.
-- `MapCreator.DealTrap`: early-return while `walk_through_walls=1`.
-- `MapCreator.CreateGoodNotTrap`: returns null while `walk_through_walls=1`, matching the old working target but now through the native metadata resolver.
+- `EntityBase.AddInitSkills`: after the hero's initial battle skills are created, injects the real `SkillAlone2080` water-walk skill once by resolving and calling `EntityBase.AddSkill(int)`.
+- `EntityBase.SetFlyWater`, `EntityBase.GetFlyWater`, `EntityBase.SetFlyStone`, `EntityBase.SetFlyAll`, `EntityBase.get_OnCalCanMove`, `EntityBase.SetCollider`, `EntityBase.check_pos`, and `EntityHitCtrl.SetFlyOne`: force only the hero's traversal state while preserving map generation.
+- Direct hero state mirroring: sets `EntityBase.bFlyWater`, `EntityBase.bFlyStone`, `EntityBase.move_layermask`, and the valid `EntityBase.m_EntityData` fly counters (`mFlyWaterCount`, `mFlyStoneCount`) after resolving the hero instance. The module does not hook `EntityData.IsFlyWater` or `EntityData.IsFlyStone`; direct getter hooks were rejected after crash triage.
 - `UnityEngine.Time.get_timeScale` and `set_timeScale`: forced game speed.
 
 The config thread still checks the authoritative app-owned config every two seconds, but it stats the file first and only reparses when size or timestamps change. In the verified default run this kept `config_loads=1` while status writes continued, so long sessions do not continually parse the config.
@@ -104,12 +104,14 @@ The config thread still checks the authoritative app-owned config every two seco
 Verified on the connected Android device after installing the rebuilt debug APK and launching `com.habby.archero/.UnityPlayerActivity`:
 
 - `il2cpp_metadata_ready=1`, `startup_hooks_ready=1`, `il2cpp_metadata_wait_ms=2000`.
-- `hook_installed_count=12`.
-- `resolver.metadata=12`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`.
-- Logcat showed all 12 startup hooks installed via metadata, including `hk_map_deal_water`, `hk_map_deal_trap`, and `hk_map_create_good_not_trap`.
-- After a longer unchanged-config run, `pidof com.habby.archero` still returned the same pid, `config_loads=1`, and status writes continued.
-- A harmless config edit and restore was picked up without restart; final restored status showed `game_speed_multiplier=3.000000` and `config_loads=4`.
-- Traversal hook counters fired during startup/map creation: `hits.walk_water`, `hits.walk_trap`, and `hits.walk_wall` all became nonzero.
+- First traversal implementation used `MapCreator.DealWater`, `MapCreator.DealTrap`, and `MapCreator.CreateGoodNotTrap`; that was rejected because it removed walls/water and also suppressed stage objects such as angels and item shops.
+- Current traversal implementation no longer hooks `MapCreator` at all.
+- `hook_installed_count=18`.
+- `resolver.metadata=19`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolution is the `EntityBase.AddSkill(int)` helper, which is called directly for traversal skill injection instead of being hooked.
+- Status confirmed all 18 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, and the Unity timeScale hooks.
+- After battle entry on the final rebuilt APK, status showed `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`, confirming the real water-walk ability path and direct fly-counter mirror both ran.
+- After selecting a starting ability and running a movement swipe, status showed `hits.walk_check_pos=206`, `hits.walk_apply=421`, `hits.walk_water=1`, and `hits.walk_wall=1`. The process remained alive as pid `12630`; filtered logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`.
+- Config polling stayed cheap during the unchanged-config run: `config_loads=1` while `status_writes` continued advancing.
 
 ## Sources
 

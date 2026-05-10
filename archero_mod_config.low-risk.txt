@@ -47,13 +47,15 @@ attack_speed=1
 shoot_through_walls=1
 
 # walk_through_water
-# Early-returns MapCreator.DealWater so water map processing is skipped for the run.
-# This is a native startup hook and defaults ON with the always-on gameplay profile.
+# Injects the real SkillAlone2080 water-walk ability for the hero at battle init when available.
+# Also mirrors EntityBase.bFlyWater, EntityData.mFlyWaterCount, and the native SetFlyWater collider path.
+# Water still spawns; this does not touch MapCreator water generation.
 walk_through_water=1
 
 # walk_through_walls
-# Early-returns MapCreator.DealTrap and nulls MapCreator.CreateGoodNotTrap.
-# This suppresses wall/trap/obstacle creation through the same native metadata-first resolver.
+# Mirrors EntityBase.bFlyStone, EntityData.mFlyStoneCount, SetFlyStone/SetFlyAll collider state,
+# and the hero check_pos traversal bypass.
+# Walls, obstacles, shops, angels, and water still spawn; this does not touch MapCreator generation.
 # It defaults ON with the always-on gameplay profile.
 walk_through_walls=1
 

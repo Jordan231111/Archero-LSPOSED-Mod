@@ -31,9 +31,16 @@ static constexpr uintptr_t EntityData_GetMiss = 0x4F6D280;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_Speed = 0x58E0F80;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_AttackSpeed = 0x58E0FB4;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_bThroughWall = 0x58E2290;
-static constexpr uintptr_t MapCreator_DealTrap = 0x5C52030;
-static constexpr uintptr_t MapCreator_DealWater = 0x5C5260C;
-static constexpr uintptr_t MapCreator_CreateGoodNotTrap = 0x5C53C84;
+static constexpr uintptr_t EntityBase_SetFlyWater = 0x4C1C294;
+static constexpr uintptr_t EntityBase_GetFlyWater = 0x4C1C4C4;
+static constexpr uintptr_t EntityBase_SetFlyStone = 0x4C1C418;
+static constexpr uintptr_t EntityBase_GetOnCalCanMove = 0x4C1FD90;
+static constexpr uintptr_t EntityBase_SetCollider = 0x4C23850;
+static constexpr uintptr_t EntityBase_SetFlyAll = 0x4C23A34;
+static constexpr uintptr_t EntityBase_CheckPos = 0x4C29A60;
+static constexpr uintptr_t EntityBase_AddSkill = 0x4C320FC;
+static constexpr uintptr_t EntityBase_AddInitSkills = 0x4C33C78;
+static constexpr uintptr_t EntityHitCtrl_SetFlyOne = 0x53094B4;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetATKBase = 0x5904E60;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase = 0x5905134;
 static constexpr uintptr_t UnityEngine_Time_get_timeScale = 0x8425C64;
@@ -255,8 +262,17 @@ static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
 }
 
 static constexpr uintptr_t kEntityDataEntityOffset = 0x18;
+static constexpr uintptr_t kEntityDataFlyStoneCountOffset = 0xA8;
+static constexpr uintptr_t kEntityDataFlyWaterCountOffset = 0xAC;
+static constexpr uintptr_t kEntityBaseDataOffset = 0xB0;
 static constexpr uintptr_t kEntityBaseTypeOffset = 0x11B4;
+static constexpr uintptr_t kEntityBaseFlyWaterOffset = 0x234;
+static constexpr uintptr_t kEntityBaseFlyStoneOffset = 0x235;
+static constexpr uintptr_t kEntityBaseHitCtrlOffset = 0xD70;
+static constexpr uintptr_t kEntityBaseMoveLayerMaskOffset = 0xE98;
+static constexpr uintptr_t kEntityHitCtrlEntityOffset = 0x10;
 static constexpr int kEntityTypeHero = 1;
+static constexpr int32_t kSkillWalkThroughWater = 2080;
 static constexpr uintptr_t kDropManagerTotalCounterStartOffset = 0x30;
 static constexpr uintptr_t kDropManagerTotalCounterEndOffset = 0xB8;
 static constexpr int32_t kAlwaysOnDamageValue = 2000000000;
@@ -337,8 +353,13 @@ static volatile uint64_t g_hit_always_health = 0;
 static volatile uint64_t g_hit_always_attack_speed = 0;
 static volatile uint64_t g_hit_always_walls = 0;
 static volatile uint64_t g_hit_walk_water = 0;
-static volatile uint64_t g_hit_walk_trap = 0;
 static volatile uint64_t g_hit_walk_wall = 0;
+static volatile uint64_t g_hit_walk_apply = 0;
+static volatile uint64_t g_hit_walk_entitydata_apply = 0;
+static volatile uint64_t g_hit_walk_mask_apply = 0;
+static volatile uint64_t g_hit_walk_runtime_apply = 0;
+static volatile uint64_t g_hit_walk_skill_inject = 0;
+static volatile uint64_t g_hit_walk_check_pos = 0;
 static volatile uint64_t g_hit_game_speed_get = 0;
 static volatile uint64_t g_hit_game_speed_set = 0;
 static volatile uint64_t g_hit_game_speed_apply = 0;
@@ -1443,9 +1464,16 @@ static const HookSpec kHookSpecs[] = {
     {rva::TableTool_Weapon_weapon_get_Speed, "TableTool", "Weapon_weapon", "get_Speed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 50 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
     {rva::TableTool_Weapon_weapon_get_AttackSpeed, "TableTool", "Weapon_weapon", "get_AttackSpeed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 B0 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
     {rva::TableTool_Weapon_weapon_get_bThroughWall, "TableTool", "Weapon_weapon", "get_bThroughWall", 0, nullptr, "FE 4F BF A9 F3 03 00 AA ?? ?? ?? ?? 60 1A 4D 39 FE 4F C1 A8 C0 03 5F D6", nullptr},
-    {rva::MapCreator_DealTrap, "", "MapCreator", "DealTrap", 0, nullptr, nullptr, nullptr},
-    {rva::MapCreator_DealWater, "", "MapCreator", "DealWater", 0, nullptr, nullptr, nullptr},
-    {rva::MapCreator_CreateGoodNotTrap, "", "MapCreator", "CreateGoodNotTrap", 4, nullptr, nullptr, nullptr},
+    {rva::EntityBase_SetFlyWater, "", "EntityBase", "SetFlyWater", 1, nullptr, nullptr, nullptr},
+    {rva::EntityBase_GetFlyWater, "", "EntityBase", "GetFlyWater", 0, nullptr, nullptr, nullptr},
+    {rva::EntityBase_SetFlyStone, "", "EntityBase", "SetFlyStone", 1, nullptr, nullptr, nullptr},
+    {rva::EntityBase_GetOnCalCanMove, "", "EntityBase", "get_OnCalCanMove", 0, nullptr, nullptr, nullptr},
+    {rva::EntityBase_SetCollider, "", "EntityBase", "SetCollider", 1, nullptr, nullptr, nullptr},
+    {rva::EntityBase_SetFlyAll, "", "EntityBase", "SetFlyAll", 1, nullptr, nullptr, nullptr},
+    {rva::EntityBase_CheckPos, "", "EntityBase", "check_pos", 1, "UnityEngine.Vector3", nullptr, nullptr},
+    {rva::EntityBase_AddSkill, "", "EntityBase", "AddSkill", 1, "System.Int32", nullptr, nullptr},
+    {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr, nullptr, nullptr},
+    {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr, nullptr, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr, "FE 4F BF A9 ?? ?? ?? ?? 60 2E 46 F9 A0 00 00 B5 ?? ?? ?? ?? 00 B4 06 91 ?? ?? ?? ?? 60 2E 06 F9 FE 4F C1 A8 00 00 1F D6", "UnityEngine.Time::get_timeScale()"},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr, "E8 0F 1E FC FE 4F 01 A9 ?? ?? ?? ?? 60 32 46 F9 08 1C A0 4E A0 00 00 B5 ?? ?? ?? ?? 00 F0 0F 91 ?? ?? ?? ?? 60 32 06 F9", "UnityEngine.Time::set_timeScale(System.Single)"},
 };
@@ -1912,8 +1940,13 @@ static void write_status_file_once() {
     fprintf(f, "hits.always_attack_speed=%llu\n", static_cast<unsigned long long>(g_hit_always_attack_speed));
     fprintf(f, "hits.always_walls=%llu\n", static_cast<unsigned long long>(g_hit_always_walls));
     fprintf(f, "hits.walk_water=%llu\n", static_cast<unsigned long long>(g_hit_walk_water));
-    fprintf(f, "hits.walk_trap=%llu\n", static_cast<unsigned long long>(g_hit_walk_trap));
     fprintf(f, "hits.walk_wall=%llu\n", static_cast<unsigned long long>(g_hit_walk_wall));
+    fprintf(f, "hits.walk_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_apply));
+    fprintf(f, "hits.walk_entitydata_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_entitydata_apply));
+    fprintf(f, "hits.walk_mask_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_mask_apply));
+    fprintf(f, "hits.walk_runtime_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_runtime_apply));
+    fprintf(f, "hits.walk_skill_inject=%llu\n", static_cast<unsigned long long>(g_hit_walk_skill_inject));
+    fprintf(f, "hits.walk_check_pos=%llu\n", static_cast<unsigned long long>(g_hit_walk_check_pos));
     fprintf(f, "hits.game_speed_get=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_get));
     fprintf(f, "hits.game_speed_set=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_set));
     fprintf(f, "hits.game_speed_apply=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_apply));
@@ -1936,15 +1969,119 @@ static void* config_thread(void*) {
     return nullptr;
 }
 
+static int get_entity_type_from_entity_base(void* entity_base);
+
 static int get_entity_type_from_entity_data(void* thiz) {
     if (!thiz) return -1;
     void* entity_base = *reinterpret_cast<void**>(
         reinterpret_cast<uintptr_t>(thiz) + kEntityDataEntityOffset
     );
     if (!entity_base) return -1;
+    return get_entity_type_from_entity_base(entity_base);
+}
+
+static int get_entity_type_from_entity_base(void* entity_base) {
+    if (!entity_base) return -1;
     return *reinterpret_cast<int*>(
         reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseTypeOffset
     );
+}
+
+static void* get_entity_base_from_hit_ctrl(void* hit_ctrl) {
+    if (!hit_ctrl) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(hit_ctrl) + kEntityHitCtrlEntityOffset
+    );
+}
+
+static void* get_hit_ctrl_from_entity_base(void* entity_base) {
+    if (!entity_base) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseHitCtrlOffset
+    );
+}
+
+static void* get_entity_data_from_entity_base(void* entity_base) {
+    if (!entity_base) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseDataOffset
+    );
+}
+
+static bool is_hero_entity_base(void* entity_base) {
+    return get_entity_type_from_entity_base(entity_base) == kEntityTypeHero;
+}
+
+struct Il2CppStringLite {
+    void* klass;
+    void* monitor;
+    int32_t length;
+    uint16_t chars[1];
+};
+
+static bool il2cpp_string_equals_ascii(void* value, const char* ascii) {
+    if (!value || !ascii) return false;
+    Il2CppStringLite* str = reinterpret_cast<Il2CppStringLite*>(value);
+    int32_t len = str->length;
+    if (len < 0 || len > 64) return false;
+    for (int32_t i = 0; i < len; ++i) {
+        unsigned char expected = static_cast<unsigned char>(ascii[i]);
+        if (expected == 0 || str->chars[i] != expected) return false;
+    }
+    return ascii[len] == '\0';
+}
+
+static bool should_force_fly_layer(void* layer) {
+    if (g_enable_walk_through_water && il2cpp_string_equals_ascii(layer, "Entity2Water")) {
+        return true;
+    }
+    if (!g_enable_walk_through_walls) return false;
+    return il2cpp_string_equals_ascii(layer, "Entity2Stone") ||
+           il2cpp_string_equals_ascii(layer, "Entity2MapOutWall") ||
+           il2cpp_string_equals_ascii(layer, "Entity2DragonStone");
+}
+
+static void set_hero_traversal_flags_direct(void* entity_base) {
+    if (!entity_base || !is_hero_entity_base(entity_base)) return;
+    uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
+    if (g_enable_walk_through_water) {
+        *reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyWaterOffset) = 1;
+    }
+    if (g_enable_walk_through_walls) {
+        *reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyStoneOffset) = 1;
+    }
+    void* entity_data = get_entity_data_from_entity_base(entity_base);
+    if (entity_data) {
+        uintptr_t data = reinterpret_cast<uintptr_t>(entity_data);
+        if (g_enable_walk_through_water) {
+            volatile int32_t* count = reinterpret_cast<volatile int32_t*>(
+                data + kEntityDataFlyWaterCountOffset
+            );
+            if (*count <= 0) {
+                *count = 1;
+                bump(g_hit_walk_entitydata_apply);
+            }
+        }
+        if (g_enable_walk_through_walls) {
+            volatile int32_t* count = reinterpret_cast<volatile int32_t*>(
+                data + kEntityDataFlyStoneCountOffset
+            );
+            if (*count <= 0) {
+                *count = 1;
+                bump(g_hit_walk_entitydata_apply);
+            }
+        }
+    }
+    if (g_enable_walk_through_water || g_enable_walk_through_walls) {
+        volatile int32_t* move_mask = reinterpret_cast<volatile int32_t*>(
+            base + kEntityBaseMoveLayerMaskOffset
+        );
+        if (*move_mask != 0) {
+            *move_mask = 0;
+            bump(g_hit_walk_mask_apply);
+        }
+    }
+    bump(g_hit_walk_apply);
 }
 
 using GetHeadShotFn = bool (*)(void* thiz, void* source, void* data, void* method);
@@ -1952,8 +2089,12 @@ using GetMissFn = bool (*)(void* thiz, void* otherhs, void* method);
 using UpgradeBaseIntFn = int32_t (*)(void* thiz, int32_t charid, void* method);
 using WeaponFloatGetterFn = float (*)(void* thiz, void* method);
 using WeaponBoolGetterFn = bool (*)(void* thiz, void* method);
-using MapCreatorVoidFn = void (*)(void* thiz, void* method);
-using MapCreatorCreateGoodNotTrapFn = void* (*)(void* thiz, int32_t good_id, int32_t x, int32_t y, void* extras, void* method);
+using EntityBoolGetterFn = bool (*)(void* thiz, void* method);
+using EntitySetBoolFn = void (*)(void* thiz, bool value, void* method);
+using EntityVoidFn = void (*)(void* thiz, void* method);
+using EntityAddSkillFn = void (*)(void* thiz, int32_t skill_id, void* method);
+using EntityVector3Fn = Vector3Lite (*)(void* thiz, Vector3Lite value, void* method);
+using EntitySetFlyOneFn = void (*)(void* thiz, void* layer, bool value, void* method);
 using TimeScaleGetterFn = float (*)(void* method);
 using TimeScaleSetterFn = void (*)(float value, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
@@ -1963,11 +2104,89 @@ static UpgradeBaseIntFn g_orig_get_hp_base = nullptr;
 static WeaponFloatGetterFn g_orig_weapon_get_speed = nullptr;
 static WeaponFloatGetterFn g_orig_weapon_get_attack_speed = nullptr;
 static WeaponBoolGetterFn g_orig_weapon_get_through_wall = nullptr;
-static MapCreatorVoidFn g_orig_map_deal_water = nullptr;
-static MapCreatorVoidFn g_orig_map_deal_trap = nullptr;
-static MapCreatorCreateGoodNotTrapFn g_orig_map_create_good_not_trap = nullptr;
+static EntitySetBoolFn g_orig_entitybase_set_fly_water = nullptr;
+static EntityBoolGetterFn g_orig_entitybase_get_fly_water = nullptr;
+static EntitySetBoolFn g_orig_entitybase_set_fly_stone = nullptr;
+static EntityBoolGetterFn g_orig_entitybase_get_on_cal_can_move = nullptr;
+static EntitySetBoolFn g_orig_entitybase_set_collider = nullptr;
+static EntitySetBoolFn g_orig_entitybase_set_fly_all = nullptr;
+static EntityVector3Fn g_orig_entitybase_check_pos = nullptr;
+static EntityVoidFn g_orig_entitybase_add_init_skills = nullptr;
+static EntityAddSkillFn g_entitybase_add_skill = nullptr;
+static EntitySetFlyOneFn g_orig_entityhitctrl_set_fly_one = nullptr;
 static TimeScaleGetterFn g_orig_time_get_scale = nullptr;
 static TimeScaleSetterFn g_orig_time_set_scale = nullptr;
+static uintptr_t g_last_traversal_entity = 0;
+static uintptr_t g_last_skill_inject_entity = 0;
+static __thread bool g_applying_traversal_runtime = false;
+
+static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
+    if (!entity_base || !is_hero_entity_base(entity_base)) return false;
+    uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
+    bool needs_sync = first_seen;
+    if (g_enable_walk_through_water) {
+        needs_sync = needs_sync ||
+            (*reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyWaterOffset) == 0);
+    }
+    if (g_enable_walk_through_walls) {
+        needs_sync = needs_sync ||
+            (*reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyStoneOffset) == 0);
+    }
+    void* entity_data = get_entity_data_from_entity_base(entity_base);
+    if (entity_data) {
+        uintptr_t data = reinterpret_cast<uintptr_t>(entity_data);
+        if (g_enable_walk_through_water) {
+            needs_sync = needs_sync ||
+                (*reinterpret_cast<volatile int32_t*>(data + kEntityDataFlyWaterCountOffset) <= 0);
+        }
+        if (g_enable_walk_through_walls) {
+            needs_sync = needs_sync ||
+                (*reinterpret_cast<volatile int32_t*>(data + kEntityDataFlyStoneCountOffset) <= 0);
+        }
+    }
+    return needs_sync;
+}
+
+static void inject_hero_traversal_skill(void* entity_base, bool force) {
+    if (!g_enable_walk_through_water || !g_entitybase_add_skill ||
+        !entity_base || !is_hero_entity_base(entity_base)) {
+        return;
+    }
+    uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
+    if (!force && g_last_skill_inject_entity == base) return;
+    g_last_skill_inject_entity = base;
+    g_entitybase_add_skill(entity_base, kSkillWalkThroughWater, nullptr);
+    bump(g_hit_walk_skill_inject);
+}
+
+static void apply_hero_traversal_runtime(void* entity_base) {
+    if (!entity_base || !is_hero_entity_base(entity_base) ||
+        !(g_enable_walk_through_water || g_enable_walk_through_walls)) {
+        return;
+    }
+    bool first_seen = g_last_traversal_entity != reinterpret_cast<uintptr_t>(entity_base);
+    bool needs_native_sync = hero_traversal_needs_native_sync(entity_base, first_seen);
+    inject_hero_traversal_skill(entity_base, false);
+    set_hero_traversal_flags_direct(entity_base);
+    if (!needs_native_sync || g_applying_traversal_runtime) return;
+
+    g_last_traversal_entity = reinterpret_cast<uintptr_t>(entity_base);
+    g_applying_traversal_runtime = true;
+    if (g_enable_walk_through_water && g_orig_entitybase_set_fly_water) {
+        g_orig_entitybase_set_fly_water(entity_base, true, nullptr);
+    }
+    if (g_enable_walk_through_walls) {
+        if (g_orig_entitybase_set_fly_stone) {
+            g_orig_entitybase_set_fly_stone(entity_base, true, nullptr);
+        }
+        if (g_orig_entitybase_set_fly_all) {
+            g_orig_entitybase_set_fly_all(entity_base, true, nullptr);
+        }
+    }
+    set_hero_traversal_flags_direct(entity_base);
+    bump(g_hit_walk_runtime_apply);
+    g_applying_traversal_runtime = false;
+}
 
 static bool hk_get_headshot(void* thiz, void* source, void* data, void* method) {
     if (!g_orig_get_headshot) return true;
@@ -2027,24 +2246,75 @@ static bool hk_weapon_get_through_wall(void* thiz, void* method) {
     return true;
 }
 
-static void hk_map_deal_water(void* thiz, void* method) {
+static void hk_entitybase_set_fly_water(void* thiz, bool value, void* method) {
     bump(g_hit_walk_water);
-    if (g_enable_walk_through_water) return;
-    if (g_orig_map_deal_water) g_orig_map_deal_water(thiz, method);
+    if (g_enable_walk_through_water && is_hero_entity_base(thiz)) value = true;
+    if (g_orig_entitybase_set_fly_water) g_orig_entitybase_set_fly_water(thiz, value, method);
+    set_hero_traversal_flags_direct(thiz);
 }
 
-static void hk_map_deal_trap(void* thiz, void* method) {
-    bump(g_hit_walk_trap);
-    if (g_enable_walk_through_walls) return;
-    if (g_orig_map_deal_trap) g_orig_map_deal_trap(thiz, method);
+static bool hk_entitybase_get_fly_water(void* thiz, void* method) {
+    bump(g_hit_walk_water);
+    if (g_enable_walk_through_water && is_hero_entity_base(thiz)) {
+        set_hero_traversal_flags_direct(thiz);
+        return true;
+    }
+    return g_orig_entitybase_get_fly_water ? g_orig_entitybase_get_fly_water(thiz, method) : false;
 }
 
-static void* hk_map_create_good_not_trap(void* thiz, int32_t good_id, int32_t x, int32_t y, void* extras, void* method) {
+static void hk_entitybase_set_fly_stone(void* thiz, bool value, void* method) {
     bump(g_hit_walk_wall);
-    if (g_enable_walk_through_walls) return nullptr;
-    return g_orig_map_create_good_not_trap
-        ? g_orig_map_create_good_not_trap(thiz, good_id, x, y, extras, method)
-        : nullptr;
+    if (g_enable_walk_through_walls && is_hero_entity_base(thiz)) value = true;
+    if (g_orig_entitybase_set_fly_stone) g_orig_entitybase_set_fly_stone(thiz, value, method);
+    set_hero_traversal_flags_direct(thiz);
+}
+
+static bool hk_entitybase_get_on_cal_can_move(void* thiz, void* method) {
+    bool can_move = g_orig_entitybase_get_on_cal_can_move
+        ? g_orig_entitybase_get_on_cal_can_move(thiz, method)
+        : true;
+    if ((g_enable_walk_through_water || g_enable_walk_through_walls) && is_hero_entity_base(thiz)) {
+        apply_hero_traversal_runtime(thiz);
+        return true;
+    }
+    return can_move;
+}
+
+static void hk_entitybase_set_collider(void* thiz, bool value, void* method) {
+    if (g_orig_entitybase_set_collider) g_orig_entitybase_set_collider(thiz, value, method);
+    if (!value || !is_hero_entity_base(thiz)) return;
+    apply_hero_traversal_runtime(thiz);
+}
+
+static void hk_entitybase_set_fly_all(void* thiz, bool value, void* method) {
+    bool hero = is_hero_entity_base(thiz);
+    bool forced = hero && (g_enable_walk_through_water || g_enable_walk_through_walls);
+    if (forced && g_enable_walk_through_walls) value = true;
+    if (g_orig_entitybase_set_fly_all) g_orig_entitybase_set_fly_all(thiz, value, method);
+    if (forced) apply_hero_traversal_runtime(thiz);
+}
+
+static Vector3Lite hk_entitybase_check_pos(void* thiz, Vector3Lite pos, void* method) {
+    if ((g_enable_walk_through_water || g_enable_walk_through_walls) && is_hero_entity_base(thiz)) {
+        apply_hero_traversal_runtime(thiz);
+        bump(g_hit_walk_check_pos);
+        return pos;
+    }
+    return g_orig_entitybase_check_pos ? g_orig_entitybase_check_pos(thiz, pos, method) : pos;
+}
+
+static void hk_entitybase_add_init_skills(void* thiz, void* method) {
+    if (g_orig_entitybase_add_init_skills) g_orig_entitybase_add_init_skills(thiz, method);
+    inject_hero_traversal_skill(thiz, true);
+    apply_hero_traversal_runtime(thiz);
+}
+
+static void hk_entityhitctrl_set_fly_one(void* thiz, void* layer, bool value, void* method) {
+    void* entity_base = get_entity_base_from_hit_ctrl(thiz);
+    bool forced = is_hero_entity_base(entity_base) && should_force_fly_layer(layer);
+    if (forced) value = true;
+    if (g_orig_entityhitctrl_set_fly_one) g_orig_entityhitctrl_set_fly_one(thiz, layer, value, method);
+    if (forced) set_hero_traversal_flags_direct(entity_base);
 }
 
 static float hk_time_get_scale(void* method) {
@@ -2565,6 +2835,20 @@ static bool install_hook(uintptr_t base, uintptr_t rva_value, void* replacement,
 #define HOOK_FN(base, rva_value, hook, orig) \
     install_hook((base), (rva_value), reinterpret_cast<void*>(hook), reinterpret_cast<void**>(&(orig)), #hook)
 
+static void resolve_traversal_helpers(uintptr_t base) {
+    const char* strategy = "unknown";
+    uintptr_t add_skill = resolve_hook_target(base, rva::EntityBase_AddSkill,
+                                              "EntityBase_AddSkill", &strategy);
+    if (add_skill && address_in_libil2cpp_exec(add_skill)) {
+        g_entitybase_add_skill = reinterpret_cast<EntityAddSkillFn>(add_skill);
+        LOGD("Resolved EntityBase_AddSkill helper at %p via %s",
+             reinterpret_cast<void*>(add_skill), strategy);
+    } else {
+        g_entitybase_add_skill = nullptr;
+        LOGD("Unable to resolve EntityBase_AddSkill helper");
+    }
+}
+
 static void install_gold_ratio_hooks(uintptr_t base) {
     HOOK_FN(base, rva::GameModeBase_GetGoldRatio, hk_game_mode_base_gold_ratio, g_orig_game_mode_base_gold_ratio);
     HOOK_FN(base, rva::GameModeBase_GetDropDataGold, hk_game_mode_base_drop_gold, g_orig_game_mode_base_drop_gold);
@@ -2748,6 +3032,7 @@ static void* hack_thread(void*) {
          g_il2cpp_metadata_ready ? 1 : 0,
          g_il2cpp_metadata_wait_ms);
 
+    resolve_traversal_helpers(il2cpp_base);
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
     HOOK_FN(il2cpp_base, rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, hk_get_atk_base, g_orig_get_atk_base);
@@ -2755,9 +3040,15 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_Speed, hk_weapon_get_speed, g_orig_weapon_get_speed);
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_AttackSpeed, hk_weapon_get_attack_speed, g_orig_weapon_get_attack_speed);
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_bThroughWall, hk_weapon_get_through_wall, g_orig_weapon_get_through_wall);
-    HOOK_FN(il2cpp_base, rva::MapCreator_DealWater, hk_map_deal_water, g_orig_map_deal_water);
-    HOOK_FN(il2cpp_base, rva::MapCreator_DealTrap, hk_map_deal_trap, g_orig_map_deal_trap);
-    HOOK_FN(il2cpp_base, rva::MapCreator_CreateGoodNotTrap, hk_map_create_good_not_trap, g_orig_map_create_good_not_trap);
+    HOOK_FN(il2cpp_base, rva::EntityBase_SetFlyWater, hk_entitybase_set_fly_water, g_orig_entitybase_set_fly_water);
+    HOOK_FN(il2cpp_base, rva::EntityBase_GetFlyWater, hk_entitybase_get_fly_water, g_orig_entitybase_get_fly_water);
+    HOOK_FN(il2cpp_base, rva::EntityBase_SetFlyStone, hk_entitybase_set_fly_stone, g_orig_entitybase_set_fly_stone);
+    HOOK_FN(il2cpp_base, rva::EntityBase_GetOnCalCanMove, hk_entitybase_get_on_cal_can_move, g_orig_entitybase_get_on_cal_can_move);
+    HOOK_FN(il2cpp_base, rva::EntityBase_SetCollider, hk_entitybase_set_collider, g_orig_entitybase_set_collider);
+    HOOK_FN(il2cpp_base, rva::EntityBase_SetFlyAll, hk_entitybase_set_fly_all, g_orig_entitybase_set_fly_all);
+    HOOK_FN(il2cpp_base, rva::EntityBase_CheckPos, hk_entitybase_check_pos, g_orig_entitybase_check_pos);
+    HOOK_FN(il2cpp_base, rva::EntityBase_AddInitSkills, hk_entitybase_add_init_skills, g_orig_entitybase_add_init_skills);
+    HOOK_FN(il2cpp_base, rva::EntityHitCtrl_SetFlyOne, hk_entityhitctrl_set_fly_one, g_orig_entityhitctrl_set_fly_one);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
     g_startup_hooks_ready = true;
