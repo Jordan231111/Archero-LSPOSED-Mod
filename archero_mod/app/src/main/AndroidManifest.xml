@@ -9,7 +9,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Archero GetHeadShot and GetMiss Mod" />
+            android:value="Archero side-aware combat, gold, and drop hooks" />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
