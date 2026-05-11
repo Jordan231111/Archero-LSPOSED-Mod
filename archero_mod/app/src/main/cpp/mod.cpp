@@ -39,6 +39,7 @@ static constexpr uintptr_t EntityBase_SetCollider = 0x4C23850;
 static constexpr uintptr_t EntityBase_SetFlyAll = 0x4C23A34;
 static constexpr uintptr_t EntityBase_CheckPos = 0x4C29A60;
 static constexpr uintptr_t EntityBase_AddSkill = 0x4C320FC;
+static constexpr uintptr_t EntityBase_ContainsSkill = 0x4C23308;
 static constexpr uintptr_t EntityBase_AddInitSkills = 0x4C33C78;
 static constexpr uintptr_t EntityHitCtrl_SetFlyOne = 0x53094B4;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetATKBase = 0x5904E60;
@@ -273,11 +274,13 @@ static constexpr uintptr_t kEntityBaseMoveLayerMaskOffset = 0xE98;
 static constexpr uintptr_t kEntityHitCtrlEntityOffset = 0x10;
 static constexpr int kEntityTypeHero = 1;
 static constexpr int32_t kSkillWalkThroughWater = 2080;
+static constexpr int32_t kSkillGreed = 1000040;
+static constexpr int32_t kSkillSmart = 1000041;
 static constexpr uintptr_t kDropManagerTotalCounterStartOffset = 0x30;
 static constexpr uintptr_t kDropManagerTotalCounterEndOffset = 0xB8;
 static constexpr int32_t kAlwaysOnDamageValue = 2000000000;
 static constexpr int32_t kAlwaysOnHealthValue = 2000000000;
-static constexpr float kAlwaysOnAttackSpeedValue = 50.0f;
+static constexpr float kAlwaysOnAttackSpeedValue = 100.0f;
 static constexpr int kIl2CppRuntimeMinSettleMs = 2000;
 static constexpr int kIl2CppMetadataPollMs = 250;
 static constexpr int kIl2CppMetadataTimeoutMs = 30000;
@@ -290,6 +293,8 @@ static volatile bool g_enable_attack_speed = true;
 static volatile bool g_enable_shoot_through_walls = true;
 static volatile bool g_enable_walk_through_water = true;
 static volatile bool g_enable_walk_through_walls = true;
+static volatile bool g_enable_inject_greed_skill = true;
+static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
@@ -314,7 +319,7 @@ static volatile int g_gold_drop_repeats = 1;
 static volatile int g_material_drop_repeats = 2;
 static volatile int g_max_drop_cap_value = 65535;
 static volatile int g_max_gold_cap_value = 2000000000;
-static volatile float g_game_speed_multiplier = 3.0f;
+static volatile float g_game_speed_multiplier = 4.0f;
 
 static constexpr int kRepeatCapMax = 50;
 static uintptr_t g_il2cpp_base = 0;
@@ -360,6 +365,14 @@ static volatile uint64_t g_hit_walk_mask_apply = 0;
 static volatile uint64_t g_hit_walk_runtime_apply = 0;
 static volatile uint64_t g_hit_walk_skill_inject = 0;
 static volatile uint64_t g_hit_walk_check_pos = 0;
+static volatile uint64_t g_hit_skill_inject_greed = 0;
+static volatile uint64_t g_hit_skill_inject_smart = 0;
+static volatile uint64_t g_hit_skill_inject_fail = 0;
+static volatile uint64_t g_hit_skill_confirm_water = 0;
+static volatile uint64_t g_hit_skill_confirm_greed = 0;
+static volatile uint64_t g_hit_skill_confirm_smart = 0;
+static volatile uint64_t g_hit_skill_confirm_fail = 0;
+static volatile uint64_t g_hit_skill_confirm_unavailable = 0;
 static volatile uint64_t g_hit_game_speed_get = 0;
 static volatile uint64_t g_hit_game_speed_set = 0;
 static volatile uint64_t g_hit_game_speed_apply = 0;
@@ -1472,6 +1485,7 @@ static const HookSpec kHookSpecs[] = {
     {rva::EntityBase_SetFlyAll, "", "EntityBase", "SetFlyAll", 1, nullptr, nullptr, nullptr},
     {rva::EntityBase_CheckPos, "", "EntityBase", "check_pos", 1, "UnityEngine.Vector3", nullptr, nullptr},
     {rva::EntityBase_AddSkill, "", "EntityBase", "AddSkill", 1, "System.Int32", nullptr, nullptr},
+    {rva::EntityBase_ContainsSkill, "", "EntityBase", "ContainsSkill", 1, "System.Int32", nullptr, nullptr},
     {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr, nullptr, nullptr},
     {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr, nullptr, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr, "FE 4F BF A9 ?? ?? ?? ?? 60 2E 46 F9 A0 00 00 B5 ?? ?? ?? ?? 00 B4 06 91 ?? ?? ?? ?? 60 2E 06 F9 FE 4F C1 A8 00 00 1F D6", "UnityEngine.Time::get_timeScale()"},
@@ -1632,8 +1646,10 @@ static bool write_default_config_file(const char* path) {
         "shoot_through_walls=1\n"
         "walk_through_water=1\n"
         "walk_through_walls=1\n"
+        "inject_greed_skill=1\n"
+        "inject_smart_skill=1\n"
         "game_speed=1\n"
-        "game_speed_multiplier=3\n"
+        "game_speed_multiplier=4\n"
         "install_gold_hooks=0\n"
         "tiny_direct_patch=0\n"
         "gold_add_scale=0\n"
@@ -1762,6 +1778,8 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "shoot_through_walls") == 0) g_enable_shoot_through_walls = parse_bool_value(value);
     else if (strcmp(key, "walk_through_water") == 0) g_enable_walk_through_water = parse_bool_value(value);
     else if (strcmp(key, "walk_through_walls") == 0) g_enable_walk_through_walls = parse_bool_value(value);
+    else if (strcmp(key, "inject_greed_skill") == 0) g_enable_inject_greed_skill = parse_bool_value(value);
+    else if (strcmp(key, "inject_smart_skill") == 0) g_enable_inject_smart_skill = parse_bool_value(value);
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "tiny_direct_patch") == 0) g_tiny_direct_patch = parse_bool_value(value);
@@ -1881,9 +1899,12 @@ static void write_status_file_once() {
     fprintf(f, "damage_v1=%d\n", g_enable_damage_v1 ? 1 : 0);
     fprintf(f, "health=%d\n", g_enable_health ? 1 : 0);
     fprintf(f, "attack_speed=%d\n", g_enable_attack_speed ? 1 : 0);
+    fprintf(f, "attack_speed_value=%f\n", static_cast<double>(kAlwaysOnAttackSpeedValue));
     fprintf(f, "shoot_through_walls=%d\n", g_enable_shoot_through_walls ? 1 : 0);
     fprintf(f, "walk_through_water=%d\n", g_enable_walk_through_water ? 1 : 0);
     fprintf(f, "walk_through_walls=%d\n", g_enable_walk_through_walls ? 1 : 0);
+    fprintf(f, "inject_greed_skill=%d\n", g_enable_inject_greed_skill ? 1 : 0);
+    fprintf(f, "inject_smart_skill=%d\n", g_enable_inject_smart_skill ? 1 : 0);
     fprintf(f, "game_speed=%d\n", g_enable_game_speed ? 1 : 0);
     fprintf(f, "game_speed_multiplier=%f\n", static_cast<double>(g_game_speed_multiplier));
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
@@ -1947,6 +1968,14 @@ static void write_status_file_once() {
     fprintf(f, "hits.walk_runtime_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_runtime_apply));
     fprintf(f, "hits.walk_skill_inject=%llu\n", static_cast<unsigned long long>(g_hit_walk_skill_inject));
     fprintf(f, "hits.walk_check_pos=%llu\n", static_cast<unsigned long long>(g_hit_walk_check_pos));
+    fprintf(f, "hits.skill_inject_greed=%llu\n", static_cast<unsigned long long>(g_hit_skill_inject_greed));
+    fprintf(f, "hits.skill_inject_smart=%llu\n", static_cast<unsigned long long>(g_hit_skill_inject_smart));
+    fprintf(f, "hits.skill_inject_fail=%llu\n", static_cast<unsigned long long>(g_hit_skill_inject_fail));
+    fprintf(f, "hits.skill_confirm_water=%llu\n", static_cast<unsigned long long>(g_hit_skill_confirm_water));
+    fprintf(f, "hits.skill_confirm_greed=%llu\n", static_cast<unsigned long long>(g_hit_skill_confirm_greed));
+    fprintf(f, "hits.skill_confirm_smart=%llu\n", static_cast<unsigned long long>(g_hit_skill_confirm_smart));
+    fprintf(f, "hits.skill_confirm_fail=%llu\n", static_cast<unsigned long long>(g_hit_skill_confirm_fail));
+    fprintf(f, "hits.skill_confirm_unavailable=%llu\n", static_cast<unsigned long long>(g_hit_skill_confirm_unavailable));
     fprintf(f, "hits.game_speed_get=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_get));
     fprintf(f, "hits.game_speed_set=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_set));
     fprintf(f, "hits.game_speed_apply=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_apply));
@@ -2093,6 +2122,7 @@ using EntityBoolGetterFn = bool (*)(void* thiz, void* method);
 using EntitySetBoolFn = void (*)(void* thiz, bool value, void* method);
 using EntityVoidFn = void (*)(void* thiz, void* method);
 using EntityAddSkillFn = void (*)(void* thiz, int32_t skill_id, void* method);
+using EntityContainsSkillFn = bool (*)(void* thiz, int32_t skill_id, void* method);
 using EntityVector3Fn = Vector3Lite (*)(void* thiz, Vector3Lite value, void* method);
 using EntitySetFlyOneFn = void (*)(void* thiz, void* layer, bool value, void* method);
 using TimeScaleGetterFn = float (*)(void* method);
@@ -2113,11 +2143,14 @@ static EntitySetBoolFn g_orig_entitybase_set_fly_all = nullptr;
 static EntityVector3Fn g_orig_entitybase_check_pos = nullptr;
 static EntityVoidFn g_orig_entitybase_add_init_skills = nullptr;
 static EntityAddSkillFn g_entitybase_add_skill = nullptr;
+static EntityContainsSkillFn g_entitybase_contains_skill = nullptr;
 static EntitySetFlyOneFn g_orig_entityhitctrl_set_fly_one = nullptr;
 static TimeScaleGetterFn g_orig_time_get_scale = nullptr;
 static TimeScaleSetterFn g_orig_time_set_scale = nullptr;
 static uintptr_t g_last_traversal_entity = 0;
-static uintptr_t g_last_skill_inject_entity = 0;
+static uintptr_t g_last_water_skill_inject_entity = 0;
+static uintptr_t g_last_greed_skill_inject_entity = 0;
+static uintptr_t g_last_smart_skill_inject_entity = 0;
 static __thread bool g_applying_traversal_runtime = false;
 
 static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
@@ -2147,16 +2180,77 @@ static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen)
     return needs_sync;
 }
 
-static void inject_hero_traversal_skill(void* entity_base, bool force) {
-    if (!g_enable_walk_through_water || !g_entitybase_add_skill ||
-        !entity_base || !is_hero_entity_base(entity_base)) {
+static bool hero_contains_skill(void* entity_base, int32_t skill_id) {
+    if (!g_entitybase_contains_skill || !entity_base) return false;
+    return g_entitybase_contains_skill(entity_base, skill_id, nullptr);
+}
+
+static void inject_hero_battle_skill(void* entity_base,
+                                     int32_t skill_id,
+                                     const char* skill_name,
+                                     bool enabled,
+                                     uintptr_t* last_entity,
+                                     volatile uint64_t* inject_counter,
+                                     volatile uint64_t* confirm_counter,
+                                     bool confirm_required,
+                                     bool force) {
+    if (!enabled || !entity_base || !is_hero_entity_base(entity_base)) {
+        return;
+    }
+    if (!g_entitybase_add_skill) {
+        bump(g_hit_skill_inject_fail);
         return;
     }
     uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
-    if (!force && g_last_skill_inject_entity == base) return;
-    g_last_skill_inject_entity = base;
-    g_entitybase_add_skill(entity_base, kSkillWalkThroughWater, nullptr);
-    bump(g_hit_walk_skill_inject);
+    if (!force && last_entity && *last_entity == base) return;
+    if (last_entity) *last_entity = base;
+
+    bool already_present = hero_contains_skill(entity_base, skill_id);
+    if (!already_present) {
+        g_entitybase_add_skill(entity_base, skill_id, nullptr);
+        bump(*inject_counter);
+    }
+
+    if (g_entitybase_contains_skill) {
+        bool confirmed = hero_contains_skill(entity_base, skill_id);
+        if (confirmed) {
+            bump(*confirm_counter);
+        } else if (confirm_required) {
+            bump(g_hit_skill_confirm_fail);
+        }
+        LOGD("Battle skill %s id=%d hero=%p force=%d already=%d confirmed=%d",
+             skill_name ? skill_name : "unknown", skill_id, entity_base,
+             force ? 1 : 0, already_present ? 1 : 0, confirmed ? 1 : 0);
+    } else {
+        if (confirm_required) bump(g_hit_skill_confirm_unavailable);
+        LOGD("Battle skill %s id=%d hero=%p force=%d already=%d confirm=unavailable",
+             skill_name ? skill_name : "unknown", skill_id, entity_base,
+             force ? 1 : 0, already_present ? 1 : 0);
+    }
+}
+
+static void inject_hero_battle_skills(void* entity_base, bool force) {
+    inject_hero_battle_skill(entity_base, kSkillWalkThroughWater, "walk_through_water",
+                             g_enable_walk_through_water,
+                             &g_last_water_skill_inject_entity,
+                             &g_hit_walk_skill_inject,
+                             &g_hit_skill_confirm_water,
+                             false,
+                             force);
+    inject_hero_battle_skill(entity_base, kSkillGreed, "greed",
+                             g_enable_inject_greed_skill,
+                             &g_last_greed_skill_inject_entity,
+                             &g_hit_skill_inject_greed,
+                             &g_hit_skill_confirm_greed,
+                             true,
+                             force);
+    inject_hero_battle_skill(entity_base, kSkillSmart, "smart",
+                             g_enable_inject_smart_skill,
+                             &g_last_smart_skill_inject_entity,
+                             &g_hit_skill_inject_smart,
+                             &g_hit_skill_confirm_smart,
+                             true,
+                             force);
 }
 
 static void apply_hero_traversal_runtime(void* entity_base) {
@@ -2166,7 +2260,7 @@ static void apply_hero_traversal_runtime(void* entity_base) {
     }
     bool first_seen = g_last_traversal_entity != reinterpret_cast<uintptr_t>(entity_base);
     bool needs_native_sync = hero_traversal_needs_native_sync(entity_base, first_seen);
-    inject_hero_traversal_skill(entity_base, false);
+    inject_hero_battle_skills(entity_base, false);
     set_hero_traversal_flags_direct(entity_base);
     if (!needs_native_sync || g_applying_traversal_runtime) return;
 
@@ -2305,7 +2399,7 @@ static Vector3Lite hk_entitybase_check_pos(void* thiz, Vector3Lite pos, void* me
 
 static void hk_entitybase_add_init_skills(void* thiz, void* method) {
     if (g_orig_entitybase_add_init_skills) g_orig_entitybase_add_init_skills(thiz, method);
-    inject_hero_traversal_skill(thiz, true);
+    inject_hero_battle_skills(thiz, true);
     apply_hero_traversal_runtime(thiz);
 }
 
@@ -2846,6 +2940,18 @@ static void resolve_traversal_helpers(uintptr_t base) {
     } else {
         g_entitybase_add_skill = nullptr;
         LOGD("Unable to resolve EntityBase_AddSkill helper");
+    }
+
+    strategy = "unknown";
+    uintptr_t contains_skill = resolve_hook_target(base, rva::EntityBase_ContainsSkill,
+                                                   "EntityBase_ContainsSkill", &strategy);
+    if (contains_skill && address_in_libil2cpp_exec(contains_skill)) {
+        g_entitybase_contains_skill = reinterpret_cast<EntityContainsSkillFn>(contains_skill);
+        LOGD("Resolved EntityBase_ContainsSkill helper at %p via %s",
+             reinterpret_cast<void*>(contains_skill), strategy);
+    } else {
+        g_entitybase_contains_skill = nullptr;
+        LOGD("Unable to resolve EntityBase_ContainsSkill helper");
     }
 }
 

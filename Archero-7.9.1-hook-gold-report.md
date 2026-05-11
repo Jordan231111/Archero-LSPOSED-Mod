@@ -60,9 +60,19 @@ Compatibility assumptions:
 
 - Do not hook `MapCreator.CreateGoodNotTrap`, `MapCreator.DealWater`, or `MapCreator.DealTrap` for traversal. They are generation-side and remove rewards/shops/angels.
 - Current traversal hooks mirror the game's own water-walk/stone-walk state instead. The module injects `SkillAlone2080` through `EntityBase.AddSkill(2080)` after `EntityBase.AddInitSkills`, calls the original `SetFlyWater`, `SetFlyStone`, and `SetFlyAll` paths for the hero, and mirrors the valid `EntityBase.m_EntityData` fly counters. This preserves map objects while changing player passability.
+- The same `EntityBase.AddSkill(int)` metadata helper now injects Smart (`1000041`) and Greed (`1000040`) at battle init. `EntityBase.ContainsSkill(int)` is resolved by metadata and called as a non-hooked confirmation helper; status counters show whether the running game accepted each skill ID. Smart is directly named by `Skill_Smart_Rate = "SlotSkill_1000041%"`; Greed is the accepted adjacent slot ID and is backed by the dump's dedicated `Skill_greedyskill` table.
+- Smart is a normal visible slot-skill entry and should usually appear in the acquired-skills UI. Greed is backed by `TableTool.Skill_greedyskill`, not just the regular `TableTool.Skill_skill` display path, so it can be accepted by `EntityBase.ContainsSkill(1000040)` without appearing in the same acquired-skills list. The status file/log confirmation is the stronger signal for Greed.
 - Do not hook `EntityData.IsFlyWater` or `EntityData.IsFlyStone` directly. Crash triage showed the getter hook could be reached with an invalid receiver around the `EntityData.IsFlyStone` RVA, so the safer implementation only writes counters through a validated hero `EntityBase`.
 - Name-based metadata resolution is strong for this target, but future overloads with the same class/method/arg-count shape should be disambiguated by parameter type.
 - GG cannot safely synthesize IL2CPP `List<T>` objects or call instance setters, so real setters/list mutation were moved into LSPosed native hooks.
+
+Server validation boundary:
+
+- The current module does not try to forge or force-accept game-over reward packets. That belongs on the server side, especially now that this target shows explicit transaction/drop state in the client.
+- `LocalSave.BattleInBase` carries `transid`, `serveruserid`, in-run `gold`, `skillids`, `goodids`, `equips`, `currentRewardIfWinList`, and server-drop dictionaries such as `m_dicDropEquipDatas`.
+- Server-issued equipment drops are represented by `LocalSave.BattleInBase.ServerDropEquips` with `transid`, `time`, and a `ServerDropEquip[]`, while `LocalSave.BattleIn_DropEquipByServer`, `BattleIn_DropEquipDataByTransId(uint)`, and `GameOverModeCtrlBase.CheckDropEquipsByServer(...)` show that item drops can be reconciled against server-provided data.
+- `HTTPSendClient.CheckGameOverCheat(NetCacheOne)` and `BattleModuleData.BuildCheatData()` show separate client-side reporting/telemetry around game-over validation.
+- For an owned server fork, the clean path is to make the server's battle-settlement validator understand the intended rules: accepted injected skill IDs, reward caps, allowed item-drop transaction IDs, and multiplier bounds. The client should report coherent local battle state; it should not be the authority that forces validation.
 
 ## B. Gold And Drop Paths
 
@@ -100,14 +110,15 @@ There is no Lua loader in the current flow. The module creates and reloads only 
 
 `/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_config.txt`
 
-The default always-on gameplay profile enables headshot, godmode, high damage, high HP, attack speed, projectile shoot-through-wall, walk-through-water, walk-through-walls, and game speed. Optional gold/drop hooks remain off unless explicitly enabled in config.
+The default always-on gameplay profile enables headshot, godmode, high damage, high HP, attack speed value `100.0`, projectile shoot-through-wall, walk-through-water, walk-through-walls, Greed skill injection, Smart skill injection, and game speed multiplier `4.0`. Optional gold/drop hooks remain off unless explicitly enabled in config.
 
 Current traversal targets:
 
 | Feature | Native target | RVA | Behavior |
 |---|---|---:|---|
-| Battle-start water walk | `EntityBase.AddInitSkills()` | `0x4C33C78` | Calls the original initializer, then injects `SkillAlone2080` once for the hero by calling resolved helper `EntityBase.AddSkill(2080)`. |
-| Battle-start water walk helper | `EntityBase.AddSkill(int)` | `0x4C320FC` | Resolved by metadata and called directly; not hooked. |
+| Battle-start skill injection | `EntityBase.AddInitSkills()` | `0x4C33C78` | Calls the original initializer, then injects water walk `2080`, Greed `1000040`, and Smart `1000041` for the hero. |
+| Battle-start skill helper | `EntityBase.AddSkill(int)` | `0x4C320FC` | Resolved by metadata and called directly; not hooked. |
+| Battle-start skill confirmation | `EntityBase.ContainsSkill(int)` | `0x4C23308` | Resolved by metadata and called directly after injection; not hooked. Updates `hits.skill_confirm_*` status counters. |
 | Walk through water | `EntityBase.SetFlyWater(bool)` | `0x4C1C294` | Forces true only for hero entity while enabled and lets the original native path update child collider state. |
 | Walk through water | `EntityBase.GetFlyWater()` | `0x4C1C4C4` | Returns true only for hero entity while enabled. |
 | Walk through walls/obstacles | `EntityBase.SetFlyStone(bool)` | `0x4C1C418` | Forces true only for hero entity while enabled and lets the original native path update child collider state. |
@@ -160,31 +171,35 @@ That is only used for primitive return methods. It is intentionally not used for
    - `il2cpp_metadata_ready=1`
    - `startup_hooks_ready=1`
    - `hook_installed_count=18`
-   - `resolver.metadata=19`
+   - `resolver.metadata=20`
    - `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`
    - `walk_through_water=1`, `walk_through_walls=1`
+   - `inject_greed_skill=1`, `inject_smart_skill=1`
 4. Confirm the process stays alive after hook installation with `adb shell pidof com.habby.archero`.
 5. For optional gold/drop hooks, edit the app-owned config and verify `config_loads` increments only after the file changes. The module stats the file every two seconds but skips reparsing unchanged content.
 6. In gameplay, verify water and obstacle behavior manually in a map containing those tiles. Status counters `hits.walk_water` and `hits.walk_wall` increment only when the relevant hero fly-water/fly-stone paths are exercised.
 
 ## F. Latest Device Verification
 
-After rebuilding and installing the debug APK on the connected device:
+After rebuilding and installing the Greed/Smart/speed-default debug APK on the connected device:
 
 - Launch activity: `com.habby.archero/.UnityPlayerActivity`.
-- Process stayed alive: `pidof com.habby.archero` returned `12630` after startup, battle entry, starting-ability selection, and movement testing.
+- Process stayed alive: `pidof com.habby.archero` returned `10896` after startup, battle entry, and status/log checks.
 - Status showed `il2cpp_metadata_ready=1`, `startup_hooks_ready=1`, and `il2cpp_metadata_wait_ms=2000`.
-- Current build installs 18 startup hooks through metadata: `hook_installed_count=18`, `resolver.metadata=19`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolution is the direct-call `EntityBase.AddSkill(int)` helper.
-- Defaults were active with `walk_through_water=1` and `walk_through_walls=1`.
-- After battle entry on the final rebuilt APK, status showed `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`, confirming the `SkillAlone2080` injection and direct hero fly-counter mirror ran.
-- After selecting a starting ability and running a movement swipe, status showed `hits.walk_check_pos=206`, `hits.walk_apply=421`, `hits.walk_water=1`, and `hits.walk_wall=1`, confirming the runtime traversal path is exercised during movement/collision evaluation.
-- Filtered crash logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`. The process remained alive.
+- Current build installs 18 startup hooks through metadata: `hook_installed_count=18`, `resolver.metadata=20`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)` helpers.
+- Defaults were active with `walk_through_water=1`, `walk_through_walls=1`, `inject_greed_skill=1`, and `inject_smart_skill=1`.
+- Speed defaults were active with `attack_speed_value=100.000000` and `game_speed_multiplier=4.000000`.
+- Battle-init logs showed `Battle skill greed id=1000040 ... confirmed=1` and `Battle skill smart id=1000041 ... confirmed=1`.
+- Final status showed `hits.skill_inject_greed=1`, `hits.skill_confirm_greed=1`, `hits.skill_inject_smart=1`, `hits.skill_confirm_smart=1`, `hits.skill_inject_fail=0`, `hits.skill_confirm_fail=0`, and `hits.skill_confirm_unavailable=0`.
+- Water traversal still runs through the direct traversal path: `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`. `hits.skill_confirm_water=0` because `ContainsSkill(2080)` does not report that lower-ID traversal ability in the same slot-skill list used by Greed/Smart.
+- After clearing logcat and watching another 10 seconds, filtered crash logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`. The process remained alive.
 - The earlier `MapCreator` traversal implementation was removed because it suppressed room objects. Current traversal does not hook `MapCreator`, so room objects such as water, walls, angels, and item shops remain generated by the game.
 
 ## Validation Gaps
 
-- Only `GetHeadShot`, `GetMiss`, side-detection fields, startup hook installation, and the traversal runtime counters were device-validated from logs/status.
+- `GetHeadShot`, `GetMiss`, side-detection fields, startup hook installation, Greed/Smart skill acceptance, and traversal runtime counters were device-validated from logs/status.
 - Manual user validation is still useful on a map with water tiles because the current room only validated battle-start water-skill injection, fly-counter writes, and obstacle/movement `check_pos` traversal. The native status confirms those paths are active.
 - All gold/material RVAs are v7.9.1 dump-derived and should be promoted into the hook report after live validation.
 - Direct profile gold setters (`LocalSave.Set_Gold`, `LocalSave.Modify_Gold`, `LocalSave.UserInfo_SetGold`) were not enabled because they affect lobby/account gold, not just in-stage gold.
 - Field writes to `EntityAttributeBase.ValueFloatBase` were not implemented in GG because they require a validated live object pointer path.
+- Optional gold/material/drop hooks remain off by default because stage settlement is not purely local. The dump shows transaction IDs, server drop payloads, cached game-over packets, and game-over cheat checks, so direct reward edits should be treated as local experiments only unless the owned server-side validator is changed to accept the same rules.

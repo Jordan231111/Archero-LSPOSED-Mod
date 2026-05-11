@@ -38,6 +38,7 @@ health=1
 
 # attack_speed
 # Forces Weapon_weapon.get_Speed and get_AttackSpeed to the module's fast attack value.
+# Current native value is 100.0.
 # This replaces the old external Attack Speed startup patch.
 attack_speed=1
 
@@ -59,6 +60,19 @@ walk_through_water=1
 # It defaults ON with the always-on gameplay profile.
 walk_through_walls=1
 
+# inject_greed_skill
+# Injects the battle skill ID 1000040 at hero battle init through metadata-resolved EntityBase.AddSkill.
+# This is the runtime-confirmed Greed slot ID adjacent to Smart and backed by the game's Skill_greedyskill table.
+# The status file confirms whether EntityBase.ContainsSkill accepts it in the running game.
+# It may not appear in the acquired-skills UI because Greed uses a separate greedyskill table/display path.
+inject_greed_skill=1
+
+# inject_smart_skill
+# Injects the named Smart slot skill ID 1000041 at hero battle init through metadata-resolved EntityBase.AddSkill.
+# The status file confirms whether EntityBase.ContainsSkill accepts it in the running game.
+# Smart should normally appear in the acquired-skills UI.
+inject_smart_skill=1
+
 # game_speed
 # Forces UnityEngine.Time.timeScale from the native module.
 # This replaces the old GameGuardian speedhack path, so the game cannot reset it back to 1 through Time.timeScale writes.
@@ -67,14 +81,15 @@ game_speed=1
 
 # game_speed_multiplier
 # The forced UnityEngine.Time.timeScale value when game_speed=1.
-# Range in native: 0.1 to 20. Default is 3 to match your old speedhack target.
+# Range in native: 0.1 to 20. Default is 4.
 # Example normal speed: game_speed=0 or game_speed_multiplier=1
-# Example default: game_speed_multiplier=3
-game_speed_multiplier=3
+# Example default: game_speed_multiplier=4
+game_speed_multiplier=4
 
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
 # 1 installs the optional hook families requested below. 0 leaves only startup gameplay hooks.
+# Keep this OFF unless the owned server-side settlement validator accepts the same reward rules.
 # Once hooks are installed in a running process they are not physically uninstalled until restart,
 # but the per-feature flags below still gate most hook behavior.
 # Example safe/default: install_gold_hooks=0

@@ -90,12 +90,15 @@ The default startup set is metadata-first and falls back to AOB/xref/RVA only if
 - `EntityData.GetMiss`: godmode behavior for the hero.
 - `TableTool.PlayerCharacter_UpgradeModel.GetATKBase`: high damage value.
 - `TableTool.PlayerCharacter_UpgradeModel.GetHPMaxBase`: high HP value.
-- `TableTool.Weapon_weapon.get_Speed` and `get_AttackSpeed`: high attack speed.
+- `TableTool.Weapon_weapon.get_Speed` and `get_AttackSpeed`: high attack speed value `100.0`.
 - `TableTool.Weapon_weapon.get_bThroughWall`: projectile shoot-through-wall behavior.
-- `EntityBase.AddInitSkills`: after the hero's initial battle skills are created, injects the real `SkillAlone2080` water-walk skill once by resolving and calling `EntityBase.AddSkill(int)`.
+- `EntityBase.AddInitSkills`: after the hero's initial battle skills are created, injects always-on battle skills by resolving and calling `EntityBase.AddSkill(int)`: water walk `2080`, Greed `1000040`, and Smart `1000041`. The module also resolves `EntityBase.ContainsSkill(int)` so status output can confirm whether each injected ID is present on the hero.
+- Smart should normally show in the acquired-skills UI because it is a regular visible slot skill (`Skill_Smart_Rate = "SlotSkill_1000041%"`). Greed is runtime-confirmed as accepted (`ContainsSkill(1000040)=true`) and backed by `TableTool.Skill_greedyskill`, but that separate table path can keep it out of the regular acquired-skills display.
 - `EntityBase.SetFlyWater`, `EntityBase.GetFlyWater`, `EntityBase.SetFlyStone`, `EntityBase.SetFlyAll`, `EntityBase.get_OnCalCanMove`, `EntityBase.SetCollider`, `EntityBase.check_pos`, and `EntityHitCtrl.SetFlyOne`: force only the hero's traversal state while preserving map generation.
 - Direct hero state mirroring: sets `EntityBase.bFlyWater`, `EntityBase.bFlyStone`, `EntityBase.move_layermask`, and the valid `EntityBase.m_EntityData` fly counters (`mFlyWaterCount`, `mFlyStoneCount`) after resolving the hero instance. The module does not hook `EntityData.IsFlyWater` or `EntityData.IsFlyStone`; direct getter hooks were rejected after crash triage.
-- `UnityEngine.Time.get_timeScale` and `set_timeScale`: forced game speed.
+- `UnityEngine.Time.get_timeScale` and `set_timeScale`: forced game speed, default multiplier `4.0`.
+
+The resolver is intentionally not used to force game-over server validation. The static dump shows transaction IDs, server-drop structures, cached game-over packets, and client-side cheat reporting around settlement. For an owned backend, update the server-side settlement rules to accept the desired skill/reward policy instead of adding client-side packet-forcing behavior.
 
 The config thread still checks the authoritative app-owned config every two seconds, but it stats the file first and only reparses when size or timestamps change. In the verified default run this kept `config_loads=1` while status writes continued, so long sessions do not continually parse the config.
 
@@ -107,10 +110,12 @@ Verified on the connected Android device after installing the rebuilt debug APK 
 - First traversal implementation used `MapCreator.DealWater`, `MapCreator.DealTrap`, and `MapCreator.CreateGoodNotTrap`; that was rejected because it removed walls/water and also suppressed stage objects such as angels and item shops.
 - Current traversal implementation no longer hooks `MapCreator` at all.
 - `hook_installed_count=18`.
-- `resolver.metadata=19`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolution is the `EntityBase.AddSkill(int)` helper, which is called directly for traversal skill injection instead of being hooked.
+- `resolver.metadata=20`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call helpers `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)`, which are called for battle-skill injection/confirmation instead of being hooked.
 - Status confirmed all 18 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, and the Unity timeScale hooks.
-- After battle entry on the final rebuilt APK, status showed `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`, confirming the real water-walk ability path and direct fly-counter mirror both ran.
-- After selecting a starting ability and running a movement swipe, status showed `hits.walk_check_pos=206`, `hits.walk_apply=421`, `hits.walk_water=1`, and `hits.walk_wall=1`. The process remained alive as pid `12630`; filtered logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`.
+- Final speed defaults were device-confirmed: `attack_speed_value=100.000000` and `game_speed_multiplier=4.000000`.
+- After battle entry on the Greed/Smart rebuilt APK, status showed `hits.skill_inject_greed=1`, `hits.skill_confirm_greed=1`, `hits.skill_inject_smart=1`, and `hits.skill_confirm_smart=1`, confirming both IDs were accepted by `EntityBase.ContainsSkill(int)` in the running game. `hits.skill_confirm_fail=0`.
+- The water skill-list confirmation remained false (`hits.skill_confirm_water=0`), but the traversal path remained active through the previously validated direct state path: `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`.
+- After battle entry and letting the battle continue, the process remained alive as pid `10896`; after clearing logcat and watching another 10 seconds, filtered logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`.
 - Config polling stayed cheap during the unchanged-config run: `config_loads=1` while `status_writes` continued advancing.
 
 ## Sources

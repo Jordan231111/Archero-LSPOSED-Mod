@@ -1,6 +1,6 @@
 # Archero LSPOSED Mod
 
-LSPosed/Xposed module for Archero (com.habby.archero) providing headshot and godmode via IL2CPP hooks.
+LSPosed/Xposed module for Archero (com.habby.archero) providing native IL2CPP gameplay hooks.
 
 **Target:** Archero v7.9.1 (arm64-v8a)
 
@@ -8,8 +8,14 @@ LSPosed/Xposed module for Archero (com.habby.archero) providing headshot and god
 
 - **Headshot:** Enemies are one-shotted (forced headshot on non-Hero entities)
 - **Godmode:** Player is invincible (forced miss on Hero entities)
+- **Always-on battle skill injection:** Water walk, Greed, and Smart are injected through metadata-resolved `EntityBase.AddSkill(int)` at battle init and confirmed with `EntityBase.ContainsSkill(int)` where the game tracks that skill ID family.
+- **Speed defaults:** Attack speed is forced to `100.0`; game speed defaults to `4.0x`.
+- **Traversal:** Hero-only water/wall traversal state is mirrored without hooking map generation, preserving walls, water, shops, and angels.
+- **Runtime resolution:** Hooks resolve by IL2CPP metadata first, then fall back to AOB/xref/RVA where available.
 
 Side-aware logic matches the original mod behavior: only the appropriate side receives the forced result.
+
+The module does not force game-over server validation. Optional direct gold/drop hooks stay off by default; for an owned server fork, update server-side settlement rules to match the intended reward policy.
 
 ## Requirements
 
@@ -42,7 +48,7 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
 
 ## Documentation
 
-See [modmenu_hook_report.txt](modmenu_hook_report.txt) for:
+See [IL2CPP-runtime-resolution.md](IL2CPP-runtime-resolution.md) and [Archero-7.9.1-hook-gold-report.md](Archero-7.9.1-hook-gold-report.md) for:
 
 - Hook addresses and side-aware logic
 - How to update for future game versions
