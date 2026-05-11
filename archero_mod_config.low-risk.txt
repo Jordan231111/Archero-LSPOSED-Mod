@@ -95,6 +95,23 @@ game_speed_multiplier=4
 # Example safe/default: install_gold_hooks=0
 install_gold_hooks=0
 
+# force_server_validation
+# Installs pass-through hooks on the client's post-battle settlement-validation
+# entry points so an owned-server operator can confirm each path actually runs:
+#   - BattleModuleData.BuildCheatData()
+#   - HTTPSendClient.CheckGameOverCheat(NetCacheOne)
+#   - LocalSave.BattleIn_DropEquipByServer
+#   - LocalSave.BattleIn_DropEquipDataByTransId(uint)
+#   - GameOverModeCtrlBase.CheckDropEquipsByServer(...)
+# Each hook calls the original implementation and bumps a counter in
+# archero_mod_status.txt under hits.validate_*. The hooks never modify return
+# values or fabricate server responses, so they cannot bypass server-side
+# validation; they exist only to make the validation flow observable so a
+# server operator can verify their backend receives a settlement check for
+# every battle. Resolution is metadata-only via class+method+arg_count.
+# Example safe/default: force_server_validation=0
+force_server_validation=0
+
 # tiny_direct_patch
 # Directly patches tiny 8-byte IL2CPP stubs that are too small for normal inline hooks.
 # This is riskier than normal hooks. It is OFF in the balanced profile.

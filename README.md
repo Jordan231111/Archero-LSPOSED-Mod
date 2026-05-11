@@ -15,7 +15,9 @@ LSPosed/Xposed module for Archero (com.habby.archero) providing native IL2CPP ga
 
 Side-aware logic matches the original mod behavior: only the appropriate side receives the forced result.
 
-The module does not force game-over server validation. Optional direct gold/drop hooks stay off by default; for an owned server fork, update server-side settlement rules to match the intended reward policy.
+The module does not forge or fake game-over server validation results. The server remains the authority for settlement. Optional direct gold/drop hooks stay off by default; for an owned server fork, update server-side settlement rules to match the intended reward policy.
+
+An optional, default-OFF `force_server_validation` switch installs pass-through hooks on the client's settlement-validation entry points (`BattleModuleData.BuildCheatData`, `HTTPSendClient.CheckGameOverCheat`, `LocalSave.BattleIn_DropEquipByServer` / `BattleIn_DropEquipDataByTransId`, `GameOverModeCtrlBase.CheckDropEquipsByServer`). The hooks only call the original and bump per-method counters so a server operator can confirm in `archero_mod_status.txt` that each validation path actually fired for a given battle. They never modify return values or fabricate server responses.
 
 ## Requirements
 
