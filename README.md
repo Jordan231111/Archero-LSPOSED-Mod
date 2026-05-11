@@ -19,6 +19,14 @@ The module does not forge or fake game-over server validation results. The serve
 
 An optional, default-OFF `force_server_validation` switch installs pass-through hooks on the client's settlement-validation entry points (`BattleModuleData.BuildCheatData`, `HTTPSendClient.CheckGameOverCheat`, `LocalSave.BattleIn_DropEquipByServer` / `BattleIn_DropEquipDataByTransId`, `GameOverModeCtrlBase.CheckDropEquipsByServer`). The hooks only call the original and bump per-method counters so a server operator can confirm in `archero_mod_status.txt` that each validation path actually fired for a given battle. They never modify return values or fabricate server responses.
 
+When `force_server_validation=1`, the module additionally:
+
+- caches the live `BattleModuleData*` observed by `BattleModuleData.AddGold` during the run and re-invokes the unmodified `BattleModuleData.BuildCheatData` on it at settlement (inside `LocalSave.BattleIn_UpdateGold`) so the cheat-data payload is rebuilt against the final coherent battle state right before each gameover packet is sent;
+- if `dump_netcacheone=1`, walks the live `NetCacheOne` argument of every `HTTPSendClient.CheckGameOverCheat` call with the IL2CPP runtime API and writes the class chain + every field (name, type, byte offset, primitive value) to `archero_mod_netcacheone.txt`, so the server operator can see the exact wire layout sent for a legitimate run;
+- if `replay_netcacheone=1`, immediately re-invokes the original `CheckGameOverCheat(HTTPSendClient*, NetCacheOne*)` with the same live arguments the game just produced, sending two identical legitimate settlement packets back-to-back so the server's idempotency / replay-rejection behavior on a real `transid` becomes observable.
+
+None of these steps fabricate IL2CPP objects, alter return values, or change client-side numbers — they only re-invoke real client methods with real game state so the server-validation flow is reproducible end-to-end. Numbers reported to the server stay consistent with what the server computed, so a clean default-config run still validates as a *successful* run on a correctly-configured server.
+
 ## Requirements
 
 - LSPosed (or compatible Xposed framework)

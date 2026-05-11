@@ -314,6 +314,9 @@ static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
 static volatile bool g_force_server_validation = false;
 static volatile bool g_force_server_validation_installed = false;
+static volatile bool g_dump_netcacheone = false;
+static volatile bool g_replay_netcacheone = false;
+static volatile uint32_t g_netcacheone_dump_max_depth = 1;
 static volatile bool g_tiny_direct_patch = false;
 static volatile bool g_gold_add_scale = false;
 static volatile bool g_gold_get_fixed = false;
@@ -399,6 +402,9 @@ static volatile uint64_t g_hit_validate_drop_equip_data_by_transid = 0;
 static volatile uint64_t g_hit_validate_check_drop_equips_by_server = 0;
 static volatile uint64_t g_hit_force_build_cheat_invoked = 0;
 static volatile uint64_t g_hit_force_build_cheat_missed = 0;
+static volatile uint64_t g_hit_netcacheone_dump = 0;
+static volatile uint64_t g_hit_netcacheone_replay = 0;
+static volatile uint64_t g_hit_netcacheone_replay_skipped = 0;
 
 // Live BattleModuleData pointer captured from BattleModuleData.AddGold during
 // an active run. Used at settlement time (LocalSave.BattleIn_UpdateGold) to
@@ -692,6 +698,16 @@ struct Il2CppApi {
     char* (*type_get_name)(void*);
     void (*free)(void*);
     void* (*method_get_pointer)(void*);
+    void* (*object_get_class)(void*);
+    void* (*class_get_fields)(void*, void**);
+    const char* (*field_get_name)(void*);
+    void* (*field_get_type)(void*);
+    size_t (*field_get_offset)(void*);
+    uint32_t (*gchandle_new)(void*, int);
+    void (*gchandle_free)(uint32_t);
+    void* (*gchandle_get_target)(uint32_t);
+    void* (*string_chars)(void*);
+    int32_t (*string_length)(void*);
 };
 
 static Il2CppApi g_il2cpp_api = {};
@@ -1099,6 +1115,16 @@ static bool resolve_il2cpp_api() {
     g_il2cpp_api.type_get_name = reinterpret_cast<char* (*)(void*)>(resolve_symbol("il2cpp_type_get_name"));
     g_il2cpp_api.free = reinterpret_cast<void (*)(void*)>(resolve_symbol("il2cpp_free"));
     g_il2cpp_api.method_get_pointer = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_method_get_pointer"));
+    g_il2cpp_api.object_get_class = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_object_get_class"));
+    g_il2cpp_api.class_get_fields = reinterpret_cast<void* (*)(void*, void**)>(resolve_symbol("il2cpp_class_get_fields"));
+    g_il2cpp_api.field_get_name = reinterpret_cast<const char* (*)(void*)>(resolve_symbol("il2cpp_field_get_name"));
+    g_il2cpp_api.field_get_type = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_field_get_type"));
+    g_il2cpp_api.field_get_offset = reinterpret_cast<size_t (*)(void*)>(resolve_symbol("il2cpp_field_get_offset"));
+    g_il2cpp_api.gchandle_new = reinterpret_cast<uint32_t (*)(void*, int)>(resolve_symbol("il2cpp_gchandle_new"));
+    g_il2cpp_api.gchandle_free = reinterpret_cast<void (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_free"));
+    g_il2cpp_api.gchandle_get_target = reinterpret_cast<void* (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_get_target"));
+    g_il2cpp_api.string_chars = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_string_chars"));
+    g_il2cpp_api.string_length = reinterpret_cast<int32_t (*)(void*)>(resolve_symbol("il2cpp_string_length"));
     bool ok = g_il2cpp_api.domain_assembly_open &&
               g_il2cpp_api.assembly_get_image && g_il2cpp_api.class_from_name &&
               g_il2cpp_api.class_get_method_from_name;
@@ -1834,6 +1860,13 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "force_server_validation") == 0) g_force_server_validation = parse_bool_value(value);
+    else if (strcmp(key, "dump_netcacheone") == 0) g_dump_netcacheone = parse_bool_value(value);
+    else if (strcmp(key, "replay_netcacheone") == 0) g_replay_netcacheone = parse_bool_value(value);
+    else if (strcmp(key, "netcacheone_dump_max_depth") == 0) {
+        long v = strtol(value, nullptr, 10);
+        if (v < 0) v = 0; if (v > 8) v = 8;
+        g_netcacheone_dump_max_depth = static_cast<uint32_t>(v);
+    }
     else if (strcmp(key, "tiny_direct_patch") == 0) g_tiny_direct_patch = parse_bool_value(value);
     else if (strcmp(key, "gold_add_scale") == 0) g_gold_add_scale = parse_bool_value(value);
     else if (strcmp(key, "gold_get_fixed") == 0) g_gold_get_fixed = parse_bool_value(value);
@@ -1964,6 +1997,9 @@ static void write_status_file_once() {
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
     fprintf(f, "force_server_validation=%d\n", g_force_server_validation ? 1 : 0);
     fprintf(f, "force_server_validation_installed=%d\n", g_force_server_validation_installed ? 1 : 0);
+    fprintf(f, "dump_netcacheone=%d\n", g_dump_netcacheone ? 1 : 0);
+    fprintf(f, "replay_netcacheone=%d\n", g_replay_netcacheone ? 1 : 0);
+    fprintf(f, "netcacheone_dump_max_depth=%u\n", static_cast<unsigned>(g_netcacheone_dump_max_depth));
     fprintf(f, "hook_installed_count=%llu\n", static_cast<unsigned long long>(g_hook_installed_count));
     fprintf(f, "hook_skipped_tiny_count=%llu\n", static_cast<unsigned long long>(g_hook_skipped_tiny_count));
     fprintf(f, "resolver.metadata=%llu\n", static_cast<unsigned long long>(g_resolve_metadata_count));
@@ -2041,6 +2077,9 @@ static void write_status_file_once() {
     fprintf(f, "hits.validate_check_drop_equips_by_server=%llu\n", static_cast<unsigned long long>(g_hit_validate_check_drop_equips_by_server));
     fprintf(f, "hits.force_build_cheat_invoked=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_invoked));
     fprintf(f, "hits.force_build_cheat_missed=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_missed));
+    fprintf(f, "hits.netcacheone_dump=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_dump));
+    fprintf(f, "hits.netcacheone_replay=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay));
+    fprintf(f, "hits.netcacheone_replay_skipped=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay_skipped));
     fclose(f);
     bump(g_status_writes);
 }
@@ -3178,9 +3217,188 @@ static void hk_validate_build_cheat_data(void* thiz, void* method) {
     if (g_orig_build_cheat_data) g_orig_build_cheat_data(thiz, method);
 }
 
+// Reads a UTF-16 IL2CPP managed string into `out` (UTF-8, best-effort).
+// Only emits the ASCII subset directly; non-ASCII chars are escaped as
+// `?` so the dump file stays text-safe. Returns the number of source chars
+// consumed (clamped to a maximum so we don't spew megabytes for huge
+// payload strings).
+static int netcacheone_format_string(void* managed_string, char* out, size_t out_size) {
+    if (!managed_string || !out || out_size == 0) return 0;
+    out[0] = '\0';
+    if (!g_il2cpp_api.string_chars || !g_il2cpp_api.string_length) return 0;
+    int32_t len = g_il2cpp_api.string_length(managed_string);
+    if (len < 0) len = 0;
+    if (len > 512) len = 512;
+    uint16_t* chars = reinterpret_cast<uint16_t*>(g_il2cpp_api.string_chars(managed_string));
+    if (!chars) return 0;
+    size_t w = 0;
+    for (int i = 0; i < len && w + 2 < out_size; ++i) {
+        uint16_t c = chars[i];
+        if (c >= 0x20 && c < 0x7F && c != '"' && c != '\\') {
+            out[w++] = static_cast<char>(c);
+        } else {
+            out[w++] = '?';
+        }
+    }
+    out[w] = '\0';
+    return len;
+}
+
+static void netcacheone_dump_value(FILE* f, const char* indent, void* base_obj,
+                                   void* field, uint32_t depth, uint32_t max_depth);
+
+static void netcacheone_dump_object(FILE* f, const char* indent, void* obj,
+                                    uint32_t depth, uint32_t max_depth) {
+    if (!f || !obj) return;
+    if (!g_il2cpp_api.object_get_class || !g_il2cpp_api.class_get_fields ||
+        !g_il2cpp_api.field_get_name || !g_il2cpp_api.field_get_type ||
+        !g_il2cpp_api.field_get_offset || !g_il2cpp_api.type_get_name) {
+        fprintf(f, "%s(missing il2cpp api: object_get_class/class_get_fields/...)\n", indent);
+        return;
+    }
+    void* klass = g_il2cpp_api.object_get_class(obj);
+    if (!klass) {
+        fprintf(f, "%s(no klass)\n", indent);
+        return;
+    }
+    char klass_chain[192] = "";
+    build_class_name_chain(klass, klass_chain, sizeof(klass_chain));
+    fprintf(f, "%sclass=%s obj=%p\n", indent, klass_chain[0] ? klass_chain : "?", obj);
+
+    void* iter = nullptr;
+    void* field = nullptr;
+    int field_count = 0;
+    char child_indent[64];
+    snprintf(child_indent, sizeof(child_indent), "%s  ", indent);
+    while ((field = g_il2cpp_api.class_get_fields(klass, &iter)) != nullptr) {
+        netcacheone_dump_value(f, child_indent, obj, field, depth, max_depth);
+        if (++field_count >= 96) {
+            fprintf(f, "%s... truncated at 96 fields\n", child_indent);
+            break;
+        }
+    }
+}
+
+static void netcacheone_dump_value(FILE* f, const char* indent, void* base_obj,
+                                   void* field, uint32_t depth, uint32_t max_depth) {
+    const char* name = g_il2cpp_api.field_get_name(field);
+    void* ftype = g_il2cpp_api.field_get_type(field);
+    char* tname_raw = ftype && g_il2cpp_api.type_get_name ? g_il2cpp_api.type_get_name(ftype) : nullptr;
+    const char* tname = tname_raw ? tname_raw : "?";
+    size_t offset = g_il2cpp_api.field_get_offset(field);
+    uint8_t* base = reinterpret_cast<uint8_t*>(base_obj);
+    if (!name) name = "?";
+
+    // Type-based readback. The il2cpp_type_get_name strings used here are the
+    // standard .NET full names exposed by libil2cpp's type_get_name.
+    if (strcmp(tname, "System.Boolean") == 0) {
+        bool v = *reinterpret_cast<bool*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %s\n", indent, name, tname, offset, v ? "true" : "false");
+    } else if (strcmp(tname, "System.Byte") == 0) {
+        uint8_t v = *reinterpret_cast<uint8_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, static_cast<unsigned>(v));
+    } else if (strcmp(tname, "System.SByte") == 0) {
+        int8_t v = *reinterpret_cast<int8_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, static_cast<int>(v));
+    } else if (strcmp(tname, "System.Int16") == 0) {
+        int16_t v = *reinterpret_cast<int16_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, static_cast<int>(v));
+    } else if (strcmp(tname, "System.UInt16") == 0 || strcmp(tname, "System.Char") == 0) {
+        uint16_t v = *reinterpret_cast<uint16_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, static_cast<unsigned>(v));
+    } else if (strcmp(tname, "System.Int32") == 0) {
+        int32_t v = *reinterpret_cast<int32_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.UInt32") == 0) {
+        uint32_t v = *reinterpret_cast<uint32_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.Int64") == 0) {
+        int64_t v = *reinterpret_cast<int64_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %lld\n", indent, name, tname, offset, static_cast<long long>(v));
+    } else if (strcmp(tname, "System.UInt64") == 0) {
+        uint64_t v = *reinterpret_cast<uint64_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %llu\n", indent, name, tname, offset, static_cast<unsigned long long>(v));
+    } else if (strcmp(tname, "System.Single") == 0) {
+        float v = *reinterpret_cast<float*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %f\n", indent, name, tname, offset, static_cast<double>(v));
+    } else if (strcmp(tname, "System.Double") == 0) {
+        double v = *reinterpret_cast<double*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %f\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.String") == 0) {
+        void* s = *reinterpret_cast<void**>(base + offset);
+        if (!s) {
+            fprintf(f, "%s%s : System.String @0x%zx = null\n", indent, name, offset);
+        } else {
+            char buf[576] = "";
+            int len = netcacheone_format_string(s, buf, sizeof(buf));
+            fprintf(f, "%s%s : System.String @0x%zx (len=%d) = \"%s\"\n", indent, name, offset, len, buf);
+        }
+    } else {
+        // Reference type or composite. Print the pointer and (optionally)
+        // recurse one more level. The il2cpp metadata gives us no easy way to
+        // distinguish value-types from reference-types here without more API
+        // surface, so we only recurse when the slot looks like a managed
+        // pointer (non-null, plausibly heap-aligned, klass header present).
+        void* slot = *reinterpret_cast<void**>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %p\n", indent, name, tname, offset, slot);
+        if (slot && depth + 1 < max_depth && g_il2cpp_api.object_get_class &&
+            g_il2cpp_api.object_get_class(slot) != nullptr) {
+            char child_indent[64];
+            snprintf(child_indent, sizeof(child_indent), "%s  ", indent);
+            netcacheone_dump_object(f, child_indent, slot, depth + 1, max_depth);
+        }
+    }
+
+    if (tname_raw && g_il2cpp_api.free) {
+        g_il2cpp_api.free(tname_raw);
+    }
+}
+
+static void dump_netcacheone_to_file(void* http_client, void* netCacheOne) {
+    if (!netCacheOne) return;
+    const char* primary = "/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_netcacheone.txt";
+    const char* fallback = "/data/data/com.habby.archero/files/archero_mod_netcacheone.txt";
+    FILE* f = fopen(primary, "w");
+    if (!f) f = fopen(fallback, "w");
+    if (!f) return;
+
+    fprintf(f, "version=archero_mod_netcacheone_v1\n");
+    fprintf(f, "http_client=%p\n", http_client);
+    fprintf(f, "netcacheone=%p\n", netCacheOne);
+    fprintf(f, "dump_max_depth=%u\n", static_cast<unsigned>(g_netcacheone_dump_max_depth));
+    fprintf(f, "fields:\n");
+    uint32_t depth_cap = g_netcacheone_dump_max_depth;
+    if (depth_cap < 1) depth_cap = 1;
+    netcacheone_dump_object(f, "  ", netCacheOne, 0, depth_cap);
+    fclose(f);
+    bump(g_hit_netcacheone_dump);
+}
+
 static void hk_validate_check_gameover_cheat(void* thiz, void* netCacheOne, void* method) {
     bump(g_hit_validate_check_gameover_cheat);
-    if (g_orig_check_gameover_cheat) g_orig_check_gameover_cheat(thiz, netCacheOne, method);
+
+    // Optional: dump the live NetCacheOne field layout + values to a
+    // sibling text file before the original call modifies it. Pure read.
+    if (g_force_server_validation && g_dump_netcacheone && netCacheOne) {
+        dump_netcacheone_to_file(thiz, netCacheOne);
+    }
+
+    // Natural call. Pass-through; no return value, no modifications.
+    if (g_orig_check_gameover_cheat) {
+        g_orig_check_gameover_cheat(thiz, netCacheOne, method);
+    }
+
+    // Optional: immediately replay the same call with the same arguments so
+    // the server-side validators see two identical CheckGameOverCheat packets
+    // back-to-back. The transid embedded in NetCacheOne is the real one the
+    // game just produced — we never fabricate it. Useful for confirming the
+    // server's idempotency / replay-rejection behavior on legitimate runs.
+    if (g_force_server_validation && g_replay_netcacheone && g_orig_check_gameover_cheat && netCacheOne) {
+        g_orig_check_gameover_cheat(thiz, netCacheOne, method);
+        bump(g_hit_netcacheone_replay);
+    } else if (g_force_server_validation && g_replay_netcacheone) {
+        bump(g_hit_netcacheone_replay_skipped);
+    }
 }
 
 static void* hk_validate_battlein_drop_equip_by_server(void* thiz, void* method) {
