@@ -397,6 +397,31 @@ static volatile uint64_t g_hit_validate_check_gameover_cheat = 0;
 static volatile uint64_t g_hit_validate_drop_equip_by_server = 0;
 static volatile uint64_t g_hit_validate_drop_equip_data_by_transid = 0;
 static volatile uint64_t g_hit_validate_check_drop_equips_by_server = 0;
+static volatile uint64_t g_hit_force_build_cheat_invoked = 0;
+static volatile uint64_t g_hit_force_build_cheat_missed = 0;
+
+// Live BattleModuleData pointer captured from BattleModuleData.AddGold during
+// an active run. Used at settlement time (LocalSave.BattleIn_UpdateGold) to
+// re-invoke BuildCheatData so the cheat-data payload is rebuilt against the
+// final coherent battle state right before the gameover packet is sent.
+// Cleared at the start of each fresh run on a best-effort basis.
+static void* volatile g_force_validate_battle_module_thiz = nullptr;
+
+// Per-function install guards. install_gold_hooks_once() and
+// install_force_server_validation_hooks_once() can independently want to
+// hook BattleModuleData.AddGold / LocalSave.BattleIn_UpdateGold, but each
+// IL2CPP target may only be A64HookFunction'd once.
+static volatile bool g_hooked_add_gold_float = false;
+static volatile bool g_hooked_add_gold_int = false;
+static volatile bool g_hooked_battlein_update_gold = false;
+
+// Trampoline for BattleModuleData.BuildCheatData. Declared here (ahead of
+// most hooks) because hk_battlein_update_gold() re-invokes it at settlement
+// time to force a cheat-data rebuild against the final coherent battle
+// state. The hook function itself is defined further down with the other
+// force_server_validation hooks.
+using BuildCheatDataFn = void (*)(void* thiz, void* method);
+static BuildCheatDataFn g_orig_build_cheat_data = nullptr;
 static volatile bool g_default_config_created = false;
 static char g_last_resolve_error[192] = "none";
 static char g_last_metadata_state[256] = "none";
@@ -2014,6 +2039,8 @@ static void write_status_file_once() {
     fprintf(f, "hits.validate_drop_equip_by_server=%llu\n", static_cast<unsigned long long>(g_hit_validate_drop_equip_by_server));
     fprintf(f, "hits.validate_drop_equip_data_by_transid=%llu\n", static_cast<unsigned long long>(g_hit_validate_drop_equip_data_by_transid));
     fprintf(f, "hits.validate_check_drop_equips_by_server=%llu\n", static_cast<unsigned long long>(g_hit_validate_check_drop_equips_by_server));
+    fprintf(f, "hits.force_build_cheat_invoked=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_invoked));
+    fprintf(f, "hits.force_build_cheat_missed=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_missed));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2549,6 +2576,9 @@ static ListReturnFn g_orig_drop_manager_get_drop_list = nullptr;
 
 static void hk_add_gold_float(void* thiz, float value, void* method) {
     bump(g_hit_add_gold);
+    if (g_force_server_validation) {
+        g_force_validate_battle_module_thiz = thiz;
+    }
     if (!g_orig_add_gold_float) return;
     if (g_gold_add_scale) value = scale_float(value, g_gold_multiplier);
     g_orig_add_gold_float(thiz, value, method);
@@ -2556,6 +2586,9 @@ static void hk_add_gold_float(void* thiz, float value, void* method) {
 
 static void hk_add_gold_int(void* thiz, int32_t value, void* method) {
     bump(g_hit_add_gold);
+    if (g_force_server_validation) {
+        g_force_validate_battle_module_thiz = thiz;
+    }
     if (!g_orig_add_gold_int) return;
     if (g_gold_add_scale) value = scale_int32(value, g_gold_multiplier);
     g_orig_add_gold_int(thiz, value, method);
@@ -2575,10 +2608,25 @@ static float hk_battle_get_gold(void* thiz, void* method) {
 
 static void hk_battlein_update_gold(void* thiz, float gold, void* method) {
     bump(g_hit_stage_balance);
-    if (!g_orig_battlein_update_gold) return;
-    if (g_gold_update_fixed) gold = g_stage_gold_fixed;
-    else if (g_gold_update_scale) gold = scale_float(gold, g_gold_multiplier);
-    g_orig_battlein_update_gold(thiz, gold, method);
+    if (g_orig_battlein_update_gold) {
+        if (g_gold_update_fixed) gold = g_stage_gold_fixed;
+        else if (g_gold_update_scale) gold = scale_float(gold, g_gold_multiplier);
+        g_orig_battlein_update_gold(thiz, gold, method);
+    }
+    // Force-invoke BuildCheatData on the cached BattleModuleData* at
+    // settlement time so the cheat-data payload is rebuilt with the final
+    // battle state right before the gameover packet is sent. Pass-through:
+    // never alters return values or fabricates objects; only re-invokes a
+    // zero-arg client method on a pointer the game itself just used.
+    if (g_force_server_validation && g_orig_build_cheat_data) {
+        void* cached = g_force_validate_battle_module_thiz;
+        if (cached) {
+            g_orig_build_cheat_data(cached, nullptr);
+            bump(g_hit_force_build_cheat_invoked);
+        } else {
+            bump(g_hit_force_build_cheat_missed);
+        }
+    }
 }
 
 static float hk_battlein_get_gold(void* thiz, void* method) {
@@ -3115,13 +3163,11 @@ static void install_max_cap_hooks(uintptr_t base) {
 // each validation path actually runs for every battle. They never
 // alter the return value or suppress the call: the server remains
 // the authority for settlement.
-using BuildCheatDataFn = void (*)(void* thiz, void* method);
 using CheckGameOverCheatFn = void (*)(void* thiz, void* netCacheOne, void* method);
 using BattleInDropEquipByServerFn = void* (*)(void* thiz, void* method);
 using BattleInDropEquipDataByTransIdFn = void* (*)(void* thiz, uint32_t transid, void* method);
 using CheckDropEquipsByServerFn = bool (*)(void* thiz, void* drops, void* method);
 
-static BuildCheatDataFn g_orig_build_cheat_data = nullptr;
 static CheckGameOverCheatFn g_orig_check_gameover_cheat = nullptr;
 static BattleInDropEquipByServerFn g_orig_battlein_drop_equip_by_server = nullptr;
 static BattleInDropEquipDataByTransIdFn g_orig_battlein_drop_equip_data_by_transid = nullptr;
@@ -3168,6 +3214,25 @@ static void install_force_server_validation_hooks_once(uintptr_t base) {
             hk_validate_battlein_drop_equip_data_by_transid, g_orig_battlein_drop_equip_data_by_transid);
     HOOK_FN(base, rva::GameOverModeCtrlBase_CheckDropEquipsByServer,
             hk_validate_check_drop_equips_by_server, g_orig_check_drop_equips_by_server);
+
+    // Hook BattleModuleData.AddGold so we can capture the live
+    // BattleModuleData* during the run, and LocalSave.BattleIn_UpdateGold so
+    // we can call BuildCheatData on that pointer at settlement time. Each
+    // target is hooked exactly once across install_gold_hooks_once() and
+    // install_force_server_validation_hooks_once() via the per-function
+    // guards below.
+    if (!g_hooked_add_gold_float) {
+        HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float);
+        g_hooked_add_gold_float = true;
+    }
+    if (!g_hooked_add_gold_int) {
+        HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int);
+        g_hooked_add_gold_int = true;
+    }
+    if (!g_hooked_battlein_update_gold) {
+        HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold);
+        g_hooked_battlein_update_gold = true;
+    }
     LOGD("Force server-validation hooks installed");
 }
 
@@ -3176,15 +3241,24 @@ static void install_gold_hooks_once(uintptr_t base) {
     g_gold_hooks_installed = true;
 
     if (g_gold_add_scale) {
-        HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float);
-        HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int);
+        if (!g_hooked_add_gold_float) {
+            HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float);
+            g_hooked_add_gold_float = true;
+        }
+        if (!g_hooked_add_gold_int) {
+            HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int);
+            g_hooked_add_gold_int = true;
+        }
     }
     if (g_gold_get_fixed || g_gold_get_scale) {
         HOOK_FN(base, rva::BattleModuleData_GetGold, hk_battle_get_gold, g_orig_battle_get_gold);
         HOOK_FN(base, rva::LocalSave_BattleIn_GetGold, hk_battlein_get_gold, g_orig_battlein_get_gold);
     }
     if (g_gold_update_fixed || g_gold_update_scale) {
-        HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold);
+        if (!g_hooked_battlein_update_gold) {
+            HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold);
+            g_hooked_battlein_update_gold = true;
+        }
     }
     if (g_gold_formula_scale) {
         HOOK_FN(base, rva::EntityData_getGold, hk_entity_get_gold, g_orig_entity_get_gold);
