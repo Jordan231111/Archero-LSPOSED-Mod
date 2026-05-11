@@ -119,8 +119,8 @@ install_gold_hooks=0
 # Counters in archero_mod_status.txt:
 #   hits.force_build_cheat_invoked  - successful force-rebuilds
 #   hits.force_build_cheat_missed   - settlement hit with no cached pointer
-# Example safe/default: force_server_validation=0
-force_server_validation=0
+# Default: force_server_validation=1
+force_server_validation=1
 
 # dump_netcacheone
 # Requires force_server_validation=1. On every HTTPSendClient.CheckGameOverCheat
@@ -130,8 +130,8 @@ force_server_validation=0
 #   /storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_netcacheone.txt
 # Pure read; never modifies the object. Useful for an owned-server operator
 # to inspect the exact wire layout the server receives for a legitimate run.
-# Example safe/default: dump_netcacheone=0
-dump_netcacheone=0
+# Default: dump_netcacheone=1
+dump_netcacheone=1
 
 # netcacheone_dump_max_depth
 # Recursion depth for dump_netcacheone (1 = top-level fields only, 2 = also
@@ -149,8 +149,8 @@ netcacheone_dump_max_depth=1
 # validator's idempotency / replay-rejection behavior on real transids
 # becomes observable. Counters: hits.netcacheone_replay (succeeded) and
 # hits.netcacheone_replay_skipped (gated off).
-# Example safe/default: replay_netcacheone=0
-replay_netcacheone=0
+# Default: replay_netcacheone=1
+replay_netcacheone=1
 
 # tiny_direct_patch
 # Directly patches tiny 8-byte IL2CPP stubs that are too small for normal inline hooks.
