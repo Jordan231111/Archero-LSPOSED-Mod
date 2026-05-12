@@ -132,6 +132,24 @@ free_story_freeze_key=0
 # Safe default: 0.
 free_story_skip_predictive=0
 
+# stage_progress_guard
+# Persistently remembers the highest LocalSave.Stage MaxLevel seen for normal,
+# hero, and infernal story modes. On login/init, lower server/cache values are
+# raised back to the highest local value so a completed chapter cannot display
+# as the previous chapter after restart. Safe default: 1.
+stage_progress_guard=1
+
+# stage_sync_retry_cache
+# Keeps story game-over packets in the built-in NetManager cache until the
+# response is synced and a later login no longer tries to downgrade that mode.
+# This is the server-sync companion to stage_progress_guard. Safe default: 1.
+stage_sync_retry_cache=1
+
+# preserve_ad_energy
+# Prevents the rewarded-ad energy counter (Buy Energy "Remaining today") from
+# decreasing while ad energy is being tested. Higher/reset values still pass.
+preserve_ad_energy=1
+
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
 # 1 installs the optional hook families requested below. 0 leaves only startup gameplay hooks.

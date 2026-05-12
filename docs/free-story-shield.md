@@ -86,6 +86,9 @@ Authoritative path: `/storage/emulated/0/Android/data/com.habby.archero/files/ar
 free_story=1
 free_story_freeze_key=0
 free_story_skip_predictive=0
+stage_progress_guard=1
+stage_sync_retry_cache=1
+preserve_ad_energy=1
 ```
 
 The status file (`archero_mod_status.txt`) reports the same flags, focused hit
@@ -95,11 +98,19 @@ counters, the life-packet fields, and the resolved Key field offset:
 free_story=1
 free_story_freeze_key=0
 free_story_skip_predictive=0
+stage_progress_guard=1
+stage_sync_retry_cache=1
+preserve_ad_energy=1
 field_offsets.localsave_userinfo_key=0xb0
+field_offsets.localsave_userinfo_ad_key_count=0xfc
 hits.free_story_send_original=N
 hits.free_story_life_packet_zeroed=N
 hits.free_story_modify_blocked=N
 hits.free_story_set_key_blocked=N
+hits.stage_guard_init_raise=N
+hits.stage_sync_response=N
+hits.stage_sync_remove_held=N
+hits.ad_energy_use_blocked=N
 hits.free_story_passthrough=N
 last.free_story_life_material_before=N
 last.free_story_life_material_after=0
