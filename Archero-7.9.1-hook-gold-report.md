@@ -198,8 +198,8 @@ Current rewarded-ad bypass targets:
 |---|---|---:|---|
 | High-level loaded check | `AdCallbackControl.IsLoaded(int)` | `0x5897EB4` | Returns loaded while `skip_rewarded_ads=1` and reward/close callback helpers resolved. |
 | High-level show | `AdCallbackControl.Show(int)` | `0x589851C` | Completes `AdCallbackControl.onReward` and `onClose` directly instead of opening an ad. |
-| High-eCPM loaded check | `AdsRequestHelper.rewarded_high_eCPM_isLoaded()` | `0x58961B8` | Returns loaded while ad skipping is enabled. |
-| High-eCPM show | `AdsRequestHelper.rewarded_high_eCPM_Show(AdsCallback, ADSource)` | `0x58961C8` | Completes the supplied callback directly. |
+| High-eCPM loaded check | `AdsRequestHelper.rewarded_high_eCPM_isLoaded()` | `0x589C404` | Returns loaded while ad skipping is enabled. |
+| High-eCPM show | `AdsRequestHelper.rewarded_high_eCPM_show(AdsCallback, ADSource)` | `0x589C518` | Completes the supplied callback directly. |
 | Driver loaded check | `AdsRequestHelper.ALMaxRewardedDriver.isLoaded()` | `0x589F24C` | Returns loaded for the lower-level AppLovin rewarded driver. |
 | Driver show | `AdsRequestHelper.ALMaxRewardedDriver.Show()` | `0x589F478` | Completes the driver's stored callback directly and returns success. |
 | Adapter loaded check | `AdsRequestHelper.WrappedAdapter.isLoaded()` | `0x58A4ABC` | Returns loaded for wrapped rewarded adapters. |
