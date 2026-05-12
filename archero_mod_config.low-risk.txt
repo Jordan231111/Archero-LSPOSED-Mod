@@ -104,6 +104,52 @@ move_speed_multiplier=1
 # Covers AdCallbackControl, high-eCPM, ALMaxRewardedDriver, WrappedAdapter, and callback-router paths.
 skip_rewarded_ads=1
 
+# free_story
+# Tier S.1 Free Story shield. Lets GameLogic.send_use_key run so the server
+# still sees a battle-start transaction, but zeros the CLifeTransPacket
+# material/key cost immediately before NetManager sends it. The matching
+# local predictive Modify_Key(-cost) inside send_use_key is blocked while
+# this scoped transaction is in progress. 1 enables the shield. 0 lets the
+# original packet and local decrement through.
+free_story=1
+
+# free_story_freeze_key
+# Defense-in-depth co-hook on LocalSave.UserInfo.SetKey. When ON, refuses
+# any authoritative resync write that would *lower* the displayed Key
+# (e.g. DoLoginCallBack pushing a freshly-deducted server value). Positive
+# writes (initial login bootstrap, ad/shop refills) still pass through so
+# real gains show up correctly. Leave OFF unless server-side accounting
+# already drifted and you need the displayed value frozen until the
+# replacement server is caught up. Safe default: 0.
+free_story_freeze_key=0
+
+# free_story_skip_predictive
+# Defense-in-depth co-hook on LocalSave.Modify_Key. When ON, drops only
+# *negative* deltas so any code path other than send_use_key that tries to
+# predictively decrement Keys is also no-op'd. Positive deltas still pass.
+# free_story=1 already blocks the scoped send_use_key Modify_Key(-cost), so
+# this is mostly belt-and-suspenders for future paths.
+# Safe default: 0.
+free_story_skip_predictive=0
+
+# stage_progress_guard
+# Persistently remembers the highest LocalSave.Stage MaxLevel seen for normal,
+# hero, and infernal story modes. On login/init, lower server/cache values are
+# raised back to the highest local value so a completed chapter cannot display
+# as the previous chapter after restart. Safe default: 1.
+stage_progress_guard=1
+
+# stage_sync_retry_cache
+# Keeps story game-over packets in the built-in NetManager cache until the
+# response is synced and a later login no longer tries to downgrade that mode.
+# This is the server-sync companion to stage_progress_guard. Safe default: 1.
+stage_sync_retry_cache=1
+
+# preserve_ad_energy
+# Prevents the rewarded-ad energy counter (Buy Energy "Remaining today") from
+# decreasing while ad energy is being tested. Higher/reset values still pass.
+preserve_ad_energy=1
+
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
 # 1 installs the optional hook families requested below. 0 leaves only startup gameplay hooks.

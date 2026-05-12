@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <time.h>
 #include <math.h>
 #include <dlfcn.h>
 #include <elf.h>
@@ -68,6 +70,7 @@ static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_Show_Callback = 0x58A
 static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_Show_Callback_Source = 0x58A4FB0;
 static constexpr uintptr_t AdsRequestHelper_rewarded_high_eCPM_isLoaded = 0x589C404;
 static constexpr uintptr_t AdsRequestHelper_rewarded_high_eCPM_show = 0x589C518;
+static constexpr uintptr_t HTTPSendClient_DoCallback = 0x33783C0;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetATKBase = 0x5904E60;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase = 0x5905134;
 static constexpr uintptr_t UnityEngine_Time_get_deltaTime = 0x84259B4;
@@ -287,6 +290,29 @@ static constexpr uintptr_t LocalSave_BattleIn_CanDropEquip = 0x5A4FA98;
 static constexpr uintptr_t LocalSave_get_CanDropType501Equip = 0x5A5B448;
 static constexpr uintptr_t LocalSave_get_CanDropType401Or402Equip = 0x5A5B03C;
 static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
+// Free Story shield: keep the battle-start life transaction alive while zeroing
+// its key material cost, then shield the local Key state from matching local
+// predictive decrements and optional authoritative resync writes. RVAs validated
+// against the 7.9.1 Il2CppDumper dump (see docs/free-story-shield.md).
+static constexpr uintptr_t GameLogic_send_use_key = 0x58CB67C;
+static constexpr uintptr_t NetManager_SendInternal_Object = 0x6842E28;
+static constexpr uintptr_t NetManager_SendInternal_Object_Retry = 0x6842EF8;
+static constexpr uintptr_t NetManager_SendInternal_Cache = 0x55CEB50;
+static constexpr uintptr_t CRespItemPacket_get_IsSuccess = 0x55A6B30;
+static constexpr uintptr_t LocalSave_EquipData_AddGameOverPacket = 0x5AF4598;
+static constexpr uintptr_t LocalSave_EquipData_RemoveGameOverPacket = 0x5AF4838;
+static constexpr uintptr_t LocalSave_EquipData_CheckCachedGameOverPacket = 0x5AF48CC;
+static constexpr uintptr_t LocalSave_Modify_Key = 0x5A494C4;
+static constexpr uintptr_t LocalSave_Stage_InitMaxLevel = 0x5B1B140;
+static constexpr uintptr_t LocalSave_Stage_UpdateMaxLevel = 0x5B1BD54;
+static constexpr uintptr_t LocalSave_Stage_InitNextID = 0x5B1BF98;
+static constexpr uintptr_t LocalSave_Stage_RollbackNextStage = 0x5B1C1B0;
+static constexpr uintptr_t LocalSave_UserInfo_SetKey = 0x5B1E9E8;
+static constexpr uintptr_t LocalSave_UserInfo_SetAdKeyCount_Direct = 0x5B1EC9C;
+static constexpr uintptr_t LocalSave_UserInfo_GetAdKeyCount_Direct = 0x5B1EC94;
+static constexpr uintptr_t LocalSave_UserInfo_SetAdKeyCount = 0x5A9DAD4;
+static constexpr uintptr_t LocalSave_UserInfo_GetAdKeyCount = 0x5A9DC18;
+static constexpr uintptr_t LocalSave_UserInfo_UseAdKeyCount = 0x5A9DC30;
 }
 
 static constexpr uintptr_t kIl2CppObjectHeaderSize = 0x10;
@@ -323,6 +349,8 @@ static uintptr_t g_off_obscured_vector3_hidden = 0;
 static uintptr_t g_off_obscured_vector3_inited = 0;
 static uintptr_t g_off_obscured_vector3_fake = 0;
 static uintptr_t g_off_obscured_vector3_fake_active = 0;
+static uintptr_t g_off_localsave_userinfo_key = 0;
+static uintptr_t g_off_localsave_userinfo_ad_key_count = 0;
 
 static constexpr int kEntityTypeHero = 1;
 static constexpr int32_t kSkillWalkThroughWater = 2080;
@@ -348,6 +376,21 @@ static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
 static volatile bool g_enable_move_speed = true;
 static volatile bool g_skip_rewarded_ads = true;
+// Free Story shield (S.1): let the story battle-start transaction go out, but
+// zero its CLifeTransPacket material cost before NetManager sends it.
+static volatile bool g_enable_free_story = true;
+// Defensive co-hook (S.2 hook 2): refuse Key resync writes that would lower
+// the displayed Key. Off by default so legitimate server refreshes stay visible.
+static volatile bool g_enable_free_story_freeze_key = false;
+// Defensive co-hook (S.2 hook 1): drop negative deltas into LocalSave.Modify_Key
+// so the client cannot predictively deduct ahead of the server reply.
+static volatile bool g_enable_free_story_skip_predictive = false;
+// Story stage guard: keep normal/hero/infernal MaxLevel monotonic across
+// login refreshes that replay an older server value over a newly-cleared local
+// value.
+static volatile bool g_enable_stage_progress_guard = true;
+static volatile bool g_enable_stage_sync_retry_cache = true;
+static volatile bool g_preserve_ad_energy = true;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
 static volatile bool g_tiny_direct_patch = false;
@@ -450,6 +493,95 @@ static volatile uint64_t g_hit_ad_skip_driver = 0;
 static volatile uint64_t g_hit_ad_skip_reward = 0;
 static volatile uint64_t g_hit_ad_skip_close = 0;
 static volatile uint64_t g_hit_ad_skip_passthrough = 0;
+static volatile uint64_t g_hit_free_story_send_blocked = 0;
+static volatile uint64_t g_hit_free_story_send_original = 0;
+static volatile uint64_t g_hit_free_story_life_packet_zeroed = 0;
+static volatile uint64_t g_hit_free_story_life_packet_passthrough = 0;
+static volatile uint64_t g_hit_free_story_modify_blocked = 0;
+static volatile uint64_t g_hit_free_story_modify_passthrough = 0;
+static volatile uint64_t g_hit_free_story_set_key_lower_attempt = 0;
+static volatile uint64_t g_hit_free_story_set_key_blocked = 0;
+static volatile uint64_t g_hit_free_story_set_key_passthrough = 0;
+static volatile uint64_t g_hit_free_story_passthrough = 0;
+static volatile uint64_t g_hit_free_story_req_item_send = 0;
+static volatile uint64_t g_hit_free_story_req_item_retry_send = 0;
+static volatile uint64_t g_hit_free_story_req_item_cache_send = 0;
+static volatile uint64_t g_hit_free_story_resp_item_success = 0;
+static volatile uint64_t g_hit_free_story_resp_item_failure = 0;
+static volatile uint64_t g_hit_free_story_gameover_add = 0;
+static volatile uint64_t g_hit_free_story_gameover_remove = 0;
+static volatile uint64_t g_hit_free_story_gameover_check = 0;
+static volatile uint64_t g_hit_free_story_stage_init_max = 0;
+static volatile uint64_t g_hit_free_story_stage_update_max = 0;
+static volatile uint64_t g_hit_free_story_stage_init_next = 0;
+static volatile uint64_t g_hit_stage_guard_init_raise = 0;
+static volatile uint64_t g_hit_stage_guard_persist = 0;
+static volatile uint64_t g_hit_stage_guard_rollback_blocked = 0;
+static volatile uint64_t g_hit_stage_sync_response = 0;
+static volatile uint64_t g_hit_stage_sync_remove_held = 0;
+static volatile uint64_t g_hit_stage_sync_remove_allowed = 0;
+static volatile uint64_t g_hit_ad_energy_get = 0;
+static volatile uint64_t g_hit_ad_energy_set_blocked = 0;
+static volatile uint64_t g_hit_ad_energy_set_passthrough = 0;
+static volatile uint64_t g_hit_ad_energy_use_blocked = 0;
+static volatile uint64_t g_hit_ad_energy_use_passthrough = 0;
+static volatile uint64_t g_trace_seq = 0;
+static volatile uint64_t g_trace_writes = 0;
+static volatile int64_t g_last_free_story_modify_delta = 0;
+static volatile int32_t g_last_free_story_modify_over = 0;
+static volatile int32_t g_last_free_story_set_key_current = 0;
+static volatile int32_t g_last_free_story_set_key_value = 0;
+static volatile int32_t g_last_free_story_set_key_had_offset = 0;
+static volatile int32_t g_last_free_story_life_sendtype = 0;
+static volatile int32_t g_last_free_story_life_material_before = 0;
+static volatile int32_t g_last_free_story_life_material_after = 0;
+static volatile int32_t g_last_free_story_life_type = 0;
+static volatile uint32_t g_last_free_story_life_battle_trans_id = 0;
+static volatile int32_t g_last_free_story_life_chap_id = 0;
+static volatile int32_t g_last_free_story_req_packet_type = 0;
+static volatile int32_t g_last_free_story_req_from_type = 0;
+static volatile uint32_t g_last_free_story_req_trans_id = 0;
+static volatile uint32_t g_last_free_story_req_extra_info = 0;
+static volatile uint32_t g_last_free_story_req_coin = 0;
+static volatile uint32_t g_last_free_story_req_exp = 0;
+static volatile int32_t g_last_free_story_req_life = 0;
+static volatile int32_t g_last_free_story_resp_packet_type = 0;
+static volatile int32_t g_last_free_story_resp_status = 0;
+static volatile int32_t g_last_free_story_resp_success = 0;
+static volatile int32_t g_last_free_story_stage_current = 0;
+static volatile int32_t g_last_free_story_stage_max_before = 0;
+static volatile int32_t g_last_free_story_stage_value = 0;
+static volatile int32_t g_last_free_story_stage_max_after = 0;
+static volatile int32_t g_last_free_story_stage_mode = 0;
+static volatile int32_t g_last_stage_guard_mode = 0;
+static volatile int32_t g_last_stage_guard_incoming = 0;
+static volatile int32_t g_last_stage_guard_before = 0;
+static volatile int32_t g_last_stage_guard_saved = 0;
+static volatile int32_t g_last_stage_guard_effective = 0;
+static volatile int32_t g_stage_guard_normal_max = 0;
+static volatile int32_t g_stage_guard_hero_max = 0;
+static volatile int32_t g_stage_guard_hell_max = 0;
+static volatile uint64_t g_stage_sync_event_seq = 0;
+static volatile uint64_t g_stage_sync_normal_add_event = 0;
+static volatile uint64_t g_stage_sync_hero_add_event = 0;
+static volatile uint64_t g_stage_sync_hell_add_event = 0;
+static volatile uint64_t g_stage_sync_normal_resp_event = 0;
+static volatile uint64_t g_stage_sync_hero_resp_event = 0;
+static volatile uint64_t g_stage_sync_hell_resp_event = 0;
+static volatile int32_t g_stage_sync_normal_verify_login = 0;
+static volatile int32_t g_stage_sync_hero_verify_login = 0;
+static volatile int32_t g_stage_sync_hell_verify_login = 0;
+static volatile int32_t g_stage_sync_normal_status = 32767;
+static volatile int32_t g_stage_sync_hero_status = 32767;
+static volatile int32_t g_stage_sync_hell_status = 32767;
+static volatile int32_t g_last_stage_sync_packet_type = 0;
+static volatile uint32_t g_last_stage_sync_trans_id = 0;
+static volatile int32_t g_last_stage_sync_status = 32767;
+static volatile int32_t g_last_stage_sync_errorid = 0;
+static volatile int32_t g_last_stage_sync_success = 0;
+static volatile int32_t g_last_ad_energy_current = -1;
+static volatile int32_t g_last_ad_energy_value = -1;
+static volatile int32_t g_last_ad_energy_result = -1;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
@@ -695,8 +827,171 @@ static float scale_float(float value, float multiplier) {
     return static_cast<float>(scaled);
 }
 
+static int32_t max_i32(int32_t a, int32_t b) {
+    return a > b ? a : b;
+}
+
 static void bump(volatile uint64_t& counter, uint64_t amount = 1) {
     counter += amount;
+}
+
+static void append_trace(const char* fmt, ...) {
+    if (!fmt) return;
+    FILE* f = fopen("/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_trace.txt", "a");
+    if (!f) {
+        f = fopen("/data/data/com.habby.archero/files/archero_mod_trace.txt", "a");
+    }
+    if (!f) return;
+
+    uint64_t seq = ++g_trace_seq;
+    time_t now = time(nullptr);
+    fprintf(f, "seq=%llu pid=%d t=%lld ",
+            static_cast<unsigned long long>(seq),
+            getpid(),
+            static_cast<long long>(now));
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fprintf(f, "\n");
+    fclose(f);
+    bump(g_trace_writes);
+}
+
+static const char* stage_guard_path() {
+    return "/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_stage_guard.txt";
+}
+
+static bool is_story_stage_mode(int32_t mode) {
+    return mode == 1001 || mode == 3042 || mode == 3043;
+}
+
+static volatile int32_t* stage_guard_slot(int32_t mode) {
+    if (mode == 1001) return &g_stage_guard_normal_max;
+    if (mode == 3042) return &g_stage_guard_hero_max;
+    if (mode == 3043) return &g_stage_guard_hell_max;
+    return nullptr;
+}
+
+static int32_t mode_for_gameover_packet_type(int32_t packet_type) {
+    if (packet_type == 1) return 1001;
+    if (packet_type == 23) return 3042;
+    if (packet_type == 38) return 3043;
+    return 0;
+}
+
+static bool is_story_gameover_packet_type(int32_t packet_type) {
+    return mode_for_gameover_packet_type(packet_type) != 0;
+}
+
+static volatile uint64_t* stage_sync_add_event_slot(int32_t mode) {
+    if (mode == 1001) return &g_stage_sync_normal_add_event;
+    if (mode == 3042) return &g_stage_sync_hero_add_event;
+    if (mode == 3043) return &g_stage_sync_hell_add_event;
+    return nullptr;
+}
+
+static volatile uint64_t* stage_sync_resp_event_slot(int32_t mode) {
+    if (mode == 1001) return &g_stage_sync_normal_resp_event;
+    if (mode == 3042) return &g_stage_sync_hero_resp_event;
+    if (mode == 3043) return &g_stage_sync_hell_resp_event;
+    return nullptr;
+}
+
+static volatile int32_t* stage_sync_verify_slot(int32_t mode) {
+    if (mode == 1001) return &g_stage_sync_normal_verify_login;
+    if (mode == 3042) return &g_stage_sync_hero_verify_login;
+    if (mode == 3043) return &g_stage_sync_hell_verify_login;
+    return nullptr;
+}
+
+static volatile int32_t* stage_sync_status_slot(int32_t mode) {
+    if (mode == 1001) return &g_stage_sync_normal_status;
+    if (mode == 3042) return &g_stage_sync_hero_status;
+    if (mode == 3043) return &g_stage_sync_hell_status;
+    return nullptr;
+}
+
+static bool stage_sync_status_means_synced(int32_t status) {
+    return status == 0 || status == 1 || status == 19;
+}
+
+static void stage_sync_mark_login_verify(int32_t mode, bool needed) {
+    volatile int32_t* slot = stage_sync_verify_slot(mode);
+    if (slot) *slot = needed ? 1 : 0;
+}
+
+static void save_stage_guard_file() {
+    FILE* f = fopen(stage_guard_path(), "w");
+    if (!f) {
+        f = fopen("/data/data/com.habby.archero/files/archero_mod_stage_guard.txt", "w");
+    }
+    if (!f) return;
+    fprintf(f, "1001=%d\n", static_cast<int>(g_stage_guard_normal_max));
+    fprintf(f, "3042=%d\n", static_cast<int>(g_stage_guard_hero_max));
+    fprintf(f, "3043=%d\n", static_cast<int>(g_stage_guard_hell_max));
+    fclose(f);
+    chmod(stage_guard_path(), 0666);
+    bump(g_hit_stage_guard_persist);
+}
+
+static void load_stage_guard_once() {
+    static bool loaded = false;
+    if (loaded) return;
+    loaded = true;
+
+    FILE* f = fopen(stage_guard_path(), "r");
+    if (!f) {
+        f = fopen("/data/data/com.habby.archero/files/archero_mod_stage_guard.txt", "r");
+    }
+    if (!f) return;
+
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        char* eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        int32_t mode = static_cast<int32_t>(strtol(line, nullptr, 10));
+        int32_t value = static_cast<int32_t>(strtol(eq + 1, nullptr, 10));
+        volatile int32_t* slot = stage_guard_slot(mode);
+        if (slot && value > *slot) *slot = value;
+    }
+    fclose(f);
+}
+
+static void stage_guard_observe(int32_t mode, int32_t max_level) {
+    if (!g_enable_stage_progress_guard || max_level <= 0) return;
+    volatile int32_t* slot = stage_guard_slot(mode);
+    if (!slot) return;
+    if (max_level > *slot) {
+        *slot = max_level;
+        g_last_stage_guard_mode = mode;
+        g_last_stage_guard_effective = max_level;
+        append_trace("stage_guard persist mode=%d max=%d", mode, max_level);
+        save_stage_guard_file();
+    }
+}
+
+static int32_t stage_guard_effective_init_max(int32_t mode, int32_t incoming, int32_t before) {
+    if (!g_enable_stage_progress_guard || !is_story_stage_mode(mode)) return incoming;
+    load_stage_guard_once();
+    volatile int32_t* slot = stage_guard_slot(mode);
+    int32_t saved = slot ? *slot : 0;
+    int32_t effective = max_i32(incoming, max_i32(before, saved));
+    g_last_stage_guard_mode = mode;
+    g_last_stage_guard_incoming = incoming;
+    g_last_stage_guard_before = before;
+    g_last_stage_guard_saved = saved;
+    g_last_stage_guard_effective = effective;
+    if (effective != incoming) {
+        bump(g_hit_stage_guard_init_raise);
+        stage_sync_mark_login_verify(mode, true);
+        append_trace("stage_guard init_raise mode=%d incoming=%d before=%d saved=%d effective=%d",
+                     mode, incoming, before, saved, effective);
+    } else if (saved > 0 && incoming >= saved) {
+        stage_sync_mark_login_verify(mode, false);
+    }
+    return effective;
 }
 
 struct ModuleSegment {
@@ -1363,6 +1658,10 @@ static void resolve_runtime_field_offsets() {
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive");
+    // Optional for free_story_freeze_key; the SetKey hook falls back to passthrough if this fails.
+    resolve_field_offset_by_metadata("", "LocalSave.UserInfo", "<Key>k__BackingField", &g_off_localsave_userinfo_key);
+    // Optional for preserve_ad_energy; ad hooks fall back to original calls if this fails.
+    resolve_field_offset_by_metadata("", "LocalSave.UserInfo", "<AdKeyCount>k__BackingField", &g_off_localsave_userinfo_ad_key_count);
 
 #undef RESOLVE_VALUE_FIELD_OFFSET
 #undef RESOLVE_FIELD_OFFSET
@@ -1636,9 +1935,28 @@ static const HookSpec kHookSpecs[] = {
     {rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, "", "AdsRequestHelper.WrappedAdapter", "Show", 2, nullptr},
     {rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, "", "AdsRequestHelper", "rewarded_high_eCPM_isLoaded", 0, nullptr},
     {rva::AdsRequestHelper_rewarded_high_eCPM_show, "", "AdsRequestHelper", "rewarded_high_eCPM_show", 2, nullptr},
+    {rva::HTTPSendClient_DoCallback, "", "HTTPSendClient", "do_callback", 2, nullptr},
     {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr},
+    {rva::NetManager_SendInternal_Object, "", "NetManager", "SendInternal", 3, nullptr},
+    {rva::NetManager_SendInternal_Cache, "", "NetManager", "SendInternal", 2, "NetCacheOne"},
+    {rva::CRespItemPacket_get_IsSuccess, "GameProtocol", "CRespItemPacket", "get_IsSuccess", 0, nullptr},
+    {rva::LocalSave_EquipData_AddGameOverPacket, "", "LocalSave.EquipData", "AddGameOverPacket", 1, "CReqItemPacket"},
+    {rva::LocalSave_EquipData_RemoveGameOverPacket, "", "LocalSave.EquipData", "RemoveGameOverPacket", 1, "CReqItemPacket"},
+    {rva::LocalSave_EquipData_CheckCachedGameOverPacket, "", "LocalSave.EquipData", "CheckCachedGameOverPacket", 1, "CReqItemPacket"},
+    {rva::GameLogic_send_use_key, "", "GameLogic", "send_use_key", 0, nullptr},
+    {rva::LocalSave_Modify_Key, "", "LocalSave", "Modify_Key", 2, nullptr},
+    {rva::LocalSave_Stage_InitMaxLevel, "", "LocalSave.Stage", "InitMaxLevel", 1, nullptr},
+    {rva::LocalSave_Stage_UpdateMaxLevel, "", "LocalSave.Stage", "UpdateMaxLevel", 1, nullptr},
+    {rva::LocalSave_Stage_InitNextID, "", "LocalSave.Stage", "InitNextID", 1, nullptr},
+    {rva::LocalSave_Stage_RollbackNextStage, "", "LocalSave.Stage", "RollbackNextStage", 0, nullptr},
+    {rva::LocalSave_UserInfo_SetKey, "", "LocalSave.UserInfo", "SetKey", 1, nullptr},
+    {rva::LocalSave_UserInfo_SetAdKeyCount_Direct, "", "LocalSave.UserInfo", "SetAdKeyCount", 1, nullptr},
+    {rva::LocalSave_UserInfo_GetAdKeyCount_Direct, "", "LocalSave.UserInfo", "get_AdKeyCount", 0, nullptr},
+    {rva::LocalSave_UserInfo_SetAdKeyCount, "", "LocalSave", "UserInfo_SetAdKeyCount", 1, nullptr},
+    {rva::LocalSave_UserInfo_GetAdKeyCount, "", "LocalSave", "UserInfo_GetAdKeyCount", 0, nullptr},
+    {rva::LocalSave_UserInfo_UseAdKeyCount, "", "LocalSave", "UserInfo_UseAdKeyCount", 0, nullptr},
 };
 
 static const HookSpec* find_hook_spec(uintptr_t rva_value) {
@@ -1656,6 +1974,16 @@ static uintptr_t resolve_hook_target(uintptr_t base, uintptr_t rva_value, const 
         if (target) {
             *strategy = "metadata";
             bump(g_resolve_metadata_count);
+            return target;
+        }
+    }
+    if (rva_value == rva::NetManager_SendInternal_Object ||
+        rva_value == rva::NetManager_SendInternal_Object_Retry ||
+        rva_value == rva::NetManager_SendInternal_Cache) {
+        uintptr_t target = base + rva_value;
+        if (address_in_libil2cpp_exec(target)) {
+            *strategy = "rva_generic_inst";
+            bump(g_resolve_rva_count);
             return target;
         }
     }
@@ -1779,6 +2107,12 @@ static bool write_default_config_file(const char* path) {
         "move_speed=1\n"
         "move_speed_multiplier=1\n"
         "skip_rewarded_ads=1\n"
+        "free_story=1\n"
+        "free_story_freeze_key=0\n"
+        "free_story_skip_predictive=0\n"
+        "stage_progress_guard=1\n"
+        "stage_sync_retry_cache=1\n"
+        "preserve_ad_energy=1\n"
         "install_gold_hooks=0\n"
         "tiny_direct_patch=0\n"
         "gold_add_scale=0\n"
@@ -1912,6 +2246,12 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
     else if (strcmp(key, "move_speed") == 0) g_enable_move_speed = parse_bool_value(value);
     else if (strcmp(key, "skip_rewarded_ads") == 0) g_skip_rewarded_ads = parse_bool_value(value);
+    else if (strcmp(key, "free_story") == 0) g_enable_free_story = parse_bool_value(value);
+    else if (strcmp(key, "free_story_freeze_key") == 0) g_enable_free_story_freeze_key = parse_bool_value(value);
+    else if (strcmp(key, "free_story_skip_predictive") == 0) g_enable_free_story_skip_predictive = parse_bool_value(value);
+    else if (strcmp(key, "stage_progress_guard") == 0) g_enable_stage_progress_guard = parse_bool_value(value);
+    else if (strcmp(key, "stage_sync_retry_cache") == 0) g_enable_stage_sync_retry_cache = parse_bool_value(value);
+    else if (strcmp(key, "preserve_ad_energy") == 0) g_preserve_ad_energy = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "tiny_direct_patch") == 0) g_tiny_direct_patch = parse_bool_value(value);
     else if (strcmp(key, "gold_add_scale") == 0) g_gold_add_scale = parse_bool_value(value);
@@ -2042,6 +2382,12 @@ static void write_status_file_once() {
     fprintf(f, "move_speed=%d\n", g_enable_move_speed ? 1 : 0);
     fprintf(f, "move_speed_multiplier=%f\n", static_cast<double>(g_move_speed_multiplier));
     fprintf(f, "skip_rewarded_ads=%d\n", g_skip_rewarded_ads ? 1 : 0);
+    fprintf(f, "free_story=%d\n", g_enable_free_story ? 1 : 0);
+    fprintf(f, "free_story_freeze_key=%d\n", g_enable_free_story_freeze_key ? 1 : 0);
+    fprintf(f, "free_story_skip_predictive=%d\n", g_enable_free_story_skip_predictive ? 1 : 0);
+    fprintf(f, "stage_progress_guard=%d\n", g_enable_stage_progress_guard ? 1 : 0);
+    fprintf(f, "stage_sync_retry_cache=%d\n", g_enable_stage_sync_retry_cache ? 1 : 0);
+    fprintf(f, "preserve_ad_energy=%d\n", g_preserve_ad_energy ? 1 : 0);
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
     fprintf(f, "hook_installed_count=%llu\n", static_cast<unsigned long long>(g_hook_installed_count));
@@ -2072,6 +2418,10 @@ static void write_status_file_once() {
             static_cast<unsigned long>(g_off_obscured_vector3_inited),
             static_cast<unsigned long>(g_off_obscured_vector3_fake),
             static_cast<unsigned long>(g_off_obscured_vector3_fake_active));
+    fprintf(f, "field_offsets.localsave_userinfo_key=0x%lx\n",
+            static_cast<unsigned long>(g_off_localsave_userinfo_key));
+    fprintf(f, "field_offsets.localsave_userinfo_ad_key_count=0x%lx\n",
+            static_cast<unsigned long>(g_off_localsave_userinfo_ad_key_count));
     fprintf(f, "direct_patch.resolved=%llu\n", static_cast<unsigned long long>(g_direct_patch_resolved_count));
     fprintf(f, "direct_patch.writes=%llu\n", static_cast<unsigned long long>(g_direct_patch_write_count));
     fprintf(f, "direct_patch.fail=%llu\n", static_cast<unsigned long long>(g_direct_patch_fail_count));
@@ -2154,6 +2504,88 @@ static void write_status_file_once() {
     fprintf(f, "hits.ad_skip_reward=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_reward));
     fprintf(f, "hits.ad_skip_close=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_close));
     fprintf(f, "hits.ad_skip_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_passthrough));
+    fprintf(f, "hits.free_story_send_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_send_blocked));
+    fprintf(f, "hits.free_story_send_original=%llu\n", static_cast<unsigned long long>(g_hit_free_story_send_original));
+    fprintf(f, "hits.free_story_life_packet_zeroed=%llu\n", static_cast<unsigned long long>(g_hit_free_story_life_packet_zeroed));
+    fprintf(f, "hits.free_story_life_packet_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_life_packet_passthrough));
+    fprintf(f, "hits.free_story_modify_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_modify_blocked));
+    fprintf(f, "hits.free_story_modify_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_modify_passthrough));
+    fprintf(f, "hits.free_story_set_key_lower_attempt=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_lower_attempt));
+    fprintf(f, "hits.free_story_set_key_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_blocked));
+    fprintf(f, "hits.free_story_set_key_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_passthrough));
+    fprintf(f, "hits.free_story_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_passthrough));
+    fprintf(f, "hits.free_story_req_item_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_send));
+    fprintf(f, "hits.free_story_req_item_retry_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_retry_send));
+    fprintf(f, "hits.free_story_req_item_cache_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_cache_send));
+    fprintf(f, "hits.free_story_resp_item_success=%llu\n", static_cast<unsigned long long>(g_hit_free_story_resp_item_success));
+    fprintf(f, "hits.free_story_resp_item_failure=%llu\n", static_cast<unsigned long long>(g_hit_free_story_resp_item_failure));
+    fprintf(f, "hits.free_story_gameover_add=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_add));
+    fprintf(f, "hits.free_story_gameover_remove=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_remove));
+    fprintf(f, "hits.free_story_gameover_check=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_check));
+    fprintf(f, "hits.free_story_stage_init_max=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_init_max));
+    fprintf(f, "hits.free_story_stage_update_max=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_update_max));
+    fprintf(f, "hits.free_story_stage_init_next=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_init_next));
+    fprintf(f, "hits.stage_guard_init_raise=%llu\n", static_cast<unsigned long long>(g_hit_stage_guard_init_raise));
+    fprintf(f, "hits.stage_guard_persist=%llu\n", static_cast<unsigned long long>(g_hit_stage_guard_persist));
+    fprintf(f, "hits.stage_guard_rollback_blocked=%llu\n", static_cast<unsigned long long>(g_hit_stage_guard_rollback_blocked));
+    fprintf(f, "hits.stage_sync_response=%llu\n", static_cast<unsigned long long>(g_hit_stage_sync_response));
+    fprintf(f, "hits.stage_sync_remove_held=%llu\n", static_cast<unsigned long long>(g_hit_stage_sync_remove_held));
+    fprintf(f, "hits.stage_sync_remove_allowed=%llu\n", static_cast<unsigned long long>(g_hit_stage_sync_remove_allowed));
+    fprintf(f, "hits.ad_energy_get=%llu\n", static_cast<unsigned long long>(g_hit_ad_energy_get));
+    fprintf(f, "hits.ad_energy_set_blocked=%llu\n", static_cast<unsigned long long>(g_hit_ad_energy_set_blocked));
+    fprintf(f, "hits.ad_energy_set_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_energy_set_passthrough));
+    fprintf(f, "hits.ad_energy_use_blocked=%llu\n", static_cast<unsigned long long>(g_hit_ad_energy_use_blocked));
+    fprintf(f, "hits.ad_energy_use_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_energy_use_passthrough));
+    fprintf(f, "trace_seq=%llu\n", static_cast<unsigned long long>(g_trace_seq));
+    fprintf(f, "trace_writes=%llu\n", static_cast<unsigned long long>(g_trace_writes));
+    fprintf(f, "last.free_story_modify_delta=%lld\n", static_cast<long long>(g_last_free_story_modify_delta));
+    fprintf(f, "last.free_story_modify_over=%d\n", static_cast<int>(g_last_free_story_modify_over));
+    fprintf(f, "last.free_story_set_key_current=%d\n", static_cast<int>(g_last_free_story_set_key_current));
+    fprintf(f, "last.free_story_set_key_value=%d\n", static_cast<int>(g_last_free_story_set_key_value));
+    fprintf(f, "last.free_story_set_key_had_offset=%d\n", static_cast<int>(g_last_free_story_set_key_had_offset));
+    fprintf(f, "last.free_story_life_sendtype=%d\n", static_cast<int>(g_last_free_story_life_sendtype));
+    fprintf(f, "last.free_story_life_material_before=%d\n", static_cast<int>(g_last_free_story_life_material_before));
+    fprintf(f, "last.free_story_life_material_after=%d\n", static_cast<int>(g_last_free_story_life_material_after));
+    fprintf(f, "last.free_story_life_type=%d\n", static_cast<int>(g_last_free_story_life_type));
+    fprintf(f, "last.free_story_life_battle_trans_id=%u\n", static_cast<unsigned int>(g_last_free_story_life_battle_trans_id));
+    fprintf(f, "last.free_story_life_chap_id=%d\n", static_cast<int>(g_last_free_story_life_chap_id));
+    fprintf(f, "last.free_story_req_packet_type=%d\n", static_cast<int>(g_last_free_story_req_packet_type));
+    fprintf(f, "last.free_story_req_from_type=%d\n", static_cast<int>(g_last_free_story_req_from_type));
+    fprintf(f, "last.free_story_req_trans_id=%u\n", static_cast<unsigned int>(g_last_free_story_req_trans_id));
+    fprintf(f, "last.free_story_req_extra_info=%u\n", static_cast<unsigned int>(g_last_free_story_req_extra_info));
+    fprintf(f, "last.free_story_req_coin=%u\n", static_cast<unsigned int>(g_last_free_story_req_coin));
+    fprintf(f, "last.free_story_req_exp=%u\n", static_cast<unsigned int>(g_last_free_story_req_exp));
+    fprintf(f, "last.free_story_req_life=%d\n", static_cast<int>(g_last_free_story_req_life));
+    fprintf(f, "last.free_story_resp_packet_type=%d\n", static_cast<int>(g_last_free_story_resp_packet_type));
+    fprintf(f, "last.free_story_resp_status=%d\n", static_cast<int>(g_last_free_story_resp_status));
+    fprintf(f, "last.free_story_resp_success=%d\n", static_cast<int>(g_last_free_story_resp_success));
+    fprintf(f, "last.free_story_stage_current=%d\n", static_cast<int>(g_last_free_story_stage_current));
+    fprintf(f, "last.free_story_stage_max_before=%d\n", static_cast<int>(g_last_free_story_stage_max_before));
+    fprintf(f, "last.free_story_stage_value=%d\n", static_cast<int>(g_last_free_story_stage_value));
+    fprintf(f, "last.free_story_stage_max_after=%d\n", static_cast<int>(g_last_free_story_stage_max_after));
+    fprintf(f, "last.free_story_stage_mode=%d\n", static_cast<int>(g_last_free_story_stage_mode));
+    fprintf(f, "last.stage_guard_mode=%d\n", static_cast<int>(g_last_stage_guard_mode));
+    fprintf(f, "last.stage_guard_incoming=%d\n", static_cast<int>(g_last_stage_guard_incoming));
+    fprintf(f, "last.stage_guard_before=%d\n", static_cast<int>(g_last_stage_guard_before));
+    fprintf(f, "last.stage_guard_saved=%d\n", static_cast<int>(g_last_stage_guard_saved));
+    fprintf(f, "last.stage_guard_effective=%d\n", static_cast<int>(g_last_stage_guard_effective));
+    fprintf(f, "stage_guard.normal_max=%d\n", static_cast<int>(g_stage_guard_normal_max));
+    fprintf(f, "stage_guard.hero_max=%d\n", static_cast<int>(g_stage_guard_hero_max));
+    fprintf(f, "stage_guard.hell_max=%d\n", static_cast<int>(g_stage_guard_hell_max));
+    fprintf(f, "stage_sync.normal_verify_login=%d\n", static_cast<int>(g_stage_sync_normal_verify_login));
+    fprintf(f, "stage_sync.hero_verify_login=%d\n", static_cast<int>(g_stage_sync_hero_verify_login));
+    fprintf(f, "stage_sync.hell_verify_login=%d\n", static_cast<int>(g_stage_sync_hell_verify_login));
+    fprintf(f, "stage_sync.normal_status=%d\n", static_cast<int>(g_stage_sync_normal_status));
+    fprintf(f, "stage_sync.hero_status=%d\n", static_cast<int>(g_stage_sync_hero_status));
+    fprintf(f, "stage_sync.hell_status=%d\n", static_cast<int>(g_stage_sync_hell_status));
+    fprintf(f, "last.stage_sync_packet_type=%d\n", static_cast<int>(g_last_stage_sync_packet_type));
+    fprintf(f, "last.stage_sync_trans_id=%u\n", static_cast<unsigned int>(g_last_stage_sync_trans_id));
+    fprintf(f, "last.stage_sync_status=%d\n", static_cast<int>(g_last_stage_sync_status));
+    fprintf(f, "last.stage_sync_errorid=%d\n", static_cast<int>(g_last_stage_sync_errorid));
+    fprintf(f, "last.stage_sync_success=%d\n", static_cast<int>(g_last_stage_sync_success));
+    fprintf(f, "last.ad_energy_current=%d\n", static_cast<int>(g_last_ad_energy_current));
+    fprintf(f, "last.ad_energy_value=%d\n", static_cast<int>(g_last_ad_energy_value));
+    fprintf(f, "last.ad_energy_result=%d\n", static_cast<int>(g_last_ad_energy_result));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2358,6 +2790,24 @@ using AdapterShowCallbackFn = bool (*)(void* thiz, void* callback, void* method)
 using AdapterShowCallbackSourceFn = bool (*)(void* thiz, void* callback, int32_t source, void* method);
 using RewardedHighEcpmIsLoadedFn = bool (*)(void* method);
 using RewardedHighEcpmShowFn = void (*)(void* callback, int32_t source, void* method);
+using HttpsDoCallbackFn = void (*)(void* thiz, void* callback, void* response, void* method);
+// Free Story shield typedefs. send_use_key is a private static void with no
+// managed args; Modify_Key/SetKey are instance methods on LocalSave and on the
+// nested LocalSave.UserInfo respectively. The trailing void* method pointer is
+// the hidden IL2CPP MethodInfo* argument the runtime appends to every call.
+using StaticVoidNoArgFn = void (*)(void* method);
+using NetManagerSendInternalObjectFn = void (*)(void* packet, int32_t sendtype, void* callback, void* method);
+using NetManagerSendInternalObjectRetryFn = void (*)(void* packet, int32_t sendtype, int32_t count, int32_t time, void* callback, void* method);
+using NetManagerSendInternalCacheFn = void (*)(void* senddata, void* callback, void* method);
+using LocalSaveModifyKeyFn = void (*)(void* thiz, int64_t key, bool over, void* method);
+using RespItemGetIsSuccessFn = bool (*)(void* thiz, void* method);
+using StageIntFn = void (*)(void* thiz, int32_t value, void* method);
+using StageVoidFn = void (*)(void* thiz, void* method);
+using EquipGameOverPacketFn = void (*)(void* thiz, void* packet, void* method);
+using UserInfoSetKeyFn = void (*)(void* thiz, int32_t value, void* method);
+using InstanceSetIntFn = void (*)(void* thiz, int32_t value, void* method);
+using InstanceGetIntFn = int32_t (*)(void* thiz, void* method);
+using InstanceBoolMethodFn = bool (*)(void* thiz, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
 static GetMissFn g_orig_get_miss = nullptr;
 static UpgradeBaseIntFn g_orig_get_atk_base = nullptr;
@@ -2405,6 +2855,29 @@ static AdapterShowCallbackFn g_orig_wrapped_adapter_show_callback = nullptr;
 static AdapterShowCallbackSourceFn g_orig_wrapped_adapter_show_callback_source = nullptr;
 static RewardedHighEcpmIsLoadedFn g_orig_rewarded_high_ecpm_is_loaded = nullptr;
 static RewardedHighEcpmShowFn g_orig_rewarded_high_ecpm_show = nullptr;
+static HttpsDoCallbackFn g_orig_https_do_callback = nullptr;
+static StaticVoidNoArgFn g_orig_send_use_key = nullptr;
+static NetManagerSendInternalObjectFn g_orig_netmanager_send_internal_object = nullptr;
+static NetManagerSendInternalObjectRetryFn g_orig_netmanager_send_internal_object_retry = nullptr;
+static NetManagerSendInternalCacheFn g_orig_netmanager_send_internal_cache = nullptr;
+static LocalSaveModifyKeyFn g_orig_localsave_modify_key = nullptr;
+static RespItemGetIsSuccessFn g_orig_crespitempacket_get_is_success = nullptr;
+static StageIntFn g_orig_stage_init_max_level = nullptr;
+static StageIntFn g_orig_stage_update_max_level = nullptr;
+static StageIntFn g_orig_stage_init_next_id = nullptr;
+static StageVoidFn g_orig_stage_rollback_next_stage = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_add_gameover_packet = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_remove_gameover_packet = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_check_cached_gameover_packet = nullptr;
+static UserInfoSetKeyFn g_orig_userinfo_set_key = nullptr;
+static InstanceSetIntFn g_orig_userinfo_set_ad_key_count_direct = nullptr;
+static InstanceGetIntFn g_orig_userinfo_get_ad_key_count_direct = nullptr;
+static InstanceSetIntFn g_orig_localsave_userinfo_set_ad_key_count = nullptr;
+static InstanceGetIntFn g_orig_localsave_userinfo_get_ad_key_count = nullptr;
+static InstanceBoolMethodFn g_orig_localsave_userinfo_use_ad_key_count = nullptr;
+static void* g_clife_trans_packet_class = nullptr;
+static void* g_creq_item_packet_class = nullptr;
+static void* g_cresp_item_packet_class = nullptr;
 static void* g_adcallback_control_class = nullptr;
 static void* g_wrappeddriver_class = nullptr;
 static void* g_combineddriver_class = nullptr;
@@ -2415,6 +2888,7 @@ static uintptr_t g_last_greed_skill_inject_entity = 0;
 static uintptr_t g_last_smart_skill_inject_entity = 0;
 static __thread bool g_applying_traversal_runtime = false;
 static __thread bool g_completing_rewarded_ad = false;
+static __thread bool g_in_free_story_send_use_key = false;
 
 static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
     if (!g_field_offsets_ready || !entity_base || !is_hero_entity_base(entity_base)) return false;
@@ -3177,6 +3651,535 @@ static bool hk_wrapped_adapter_show_callback_source(void* thiz, void* callback, 
     }
     bump(g_hit_ad_skip_passthrough);
     return g_orig_wrapped_adapter_show_callback_source ? g_orig_wrapped_adapter_show_callback_source(thiz, callback, source, method) : false;
+}
+
+static bool is_creq_item_packet(void* packet) {
+    return packet && g_creq_item_packet_class && is_instance_of_class(packet, g_creq_item_packet_class);
+}
+
+static bool log_creq_item_packet(const char* source, void* packet, int32_t sendtype) {
+    if (!is_creq_item_packet(packet)) return false;
+    uint8_t* base = reinterpret_cast<uint8_t*>(packet);
+    uint32_t trans_id = *reinterpret_cast<uint32_t*>(base + 0x28);
+    uint16_t packet_type = *reinterpret_cast<uint16_t*>(base + 0x2C);
+    uint16_t from_type = *reinterpret_cast<uint16_t*>(base + 0x2E);
+    uint32_t extra_info = *reinterpret_cast<uint32_t*>(base + 0x30);
+    uint32_t coin = *reinterpret_cast<uint32_t*>(base + 0x34);
+    uint16_t life = *reinterpret_cast<uint16_t*>(base + 0x3C);
+    uint32_t exp = *reinterpret_cast<uint32_t*>(base + 0x40);
+
+    g_last_free_story_req_packet_type = packet_type;
+    g_last_free_story_req_from_type = from_type;
+    g_last_free_story_req_trans_id = trans_id;
+    g_last_free_story_req_extra_info = extra_info;
+    g_last_free_story_req_coin = coin;
+    g_last_free_story_req_exp = exp;
+    g_last_free_story_req_life = life;
+    append_trace("creq_item source=%s sendtype=%d type=%u from=%u trans=%u extra=%u coin=%u exp=%u life=%u",
+                 source ? source : "unknown",
+                 sendtype,
+                 static_cast<unsigned>(packet_type),
+                 static_cast<unsigned>(from_type),
+                 static_cast<unsigned>(trans_id),
+                 static_cast<unsigned>(extra_info),
+                 static_cast<unsigned>(coin),
+                 static_cast<unsigned>(exp),
+                 static_cast<unsigned>(life));
+    LOGD("FreeStory CReqItemPacket source=%s sendtype=%d type=%u trans=%u extra=%u life=%u",
+         source ? source : "unknown", sendtype, static_cast<unsigned>(packet_type),
+         static_cast<unsigned>(trans_id), static_cast<unsigned>(extra_info),
+         static_cast<unsigned>(life));
+    return true;
+}
+
+static uint16_t read_creq_item_packet_type(void* packet) {
+    if (!is_creq_item_packet(packet)) return 0;
+    return *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(packet) + 0x2C);
+}
+
+static uint32_t read_creq_item_trans_id(void* packet) {
+    if (!is_creq_item_packet(packet)) return 0;
+    return *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(packet) + 0x28);
+}
+
+static void stage_sync_mark_gameover_add(void* packet) {
+    uint16_t packet_type = read_creq_item_packet_type(packet);
+    int32_t mode = mode_for_gameover_packet_type(packet_type);
+    if (!mode) return;
+    volatile uint64_t* add_slot = stage_sync_add_event_slot(mode);
+    volatile int32_t* status_slot = stage_sync_status_slot(mode);
+    uint64_t event = ++g_stage_sync_event_seq;
+    if (add_slot) *add_slot = event;
+    if (status_slot) *status_slot = 32767;
+    g_last_stage_sync_packet_type = packet_type;
+    g_last_stage_sync_trans_id = read_creq_item_trans_id(packet);
+    g_last_stage_sync_status = 32767;
+    g_last_stage_sync_success = 0;
+    append_trace("stage_sync add_pending type=%u mode=%d trans=%u event=%llu verify=%d",
+                 static_cast<unsigned>(packet_type), mode,
+                 static_cast<unsigned>(g_last_stage_sync_trans_id),
+                 static_cast<unsigned long long>(event),
+                 stage_sync_verify_slot(mode) ? static_cast<int>(*stage_sync_verify_slot(mode)) : 0);
+}
+
+static void stage_sync_mark_response(int32_t packet_type, int32_t status, int32_t errorid) {
+    int32_t mode = mode_for_gameover_packet_type(packet_type);
+    if (!mode) return;
+    uint64_t event = ++g_stage_sync_event_seq;
+    volatile uint64_t* resp_slot = stage_sync_resp_event_slot(mode);
+    volatile int32_t* status_slot = stage_sync_status_slot(mode);
+    if (resp_slot) *resp_slot = event;
+    if (status_slot) *status_slot = status;
+    g_last_stage_sync_packet_type = packet_type;
+    g_last_stage_sync_status = status;
+    g_last_stage_sync_errorid = errorid;
+    g_last_stage_sync_success = stage_sync_status_means_synced(status) ? 1 : 0;
+    bump(g_hit_stage_sync_response);
+    append_trace("stage_sync response type=%d mode=%d status=%d errorid=%d event=%llu synced=%d",
+                 packet_type, mode, status, errorid,
+                 static_cast<unsigned long long>(event),
+                 g_last_stage_sync_success ? 1 : 0);
+}
+
+static bool stage_sync_can_remove(void* packet, char* reason, size_t reason_size) {
+    if (reason && reason_size) reason[0] = '\0';
+    if (!g_enable_stage_sync_retry_cache) return true;
+    uint16_t packet_type = read_creq_item_packet_type(packet);
+    int32_t mode = mode_for_gameover_packet_type(packet_type);
+    if (!mode) return true;
+
+    volatile uint64_t* add_slot = stage_sync_add_event_slot(mode);
+    volatile uint64_t* resp_slot = stage_sync_resp_event_slot(mode);
+    volatile int32_t* verify_slot = stage_sync_verify_slot(mode);
+    volatile int32_t* status_slot = stage_sync_status_slot(mode);
+    uint64_t add_event = add_slot ? *add_slot : 0;
+    uint64_t resp_event = resp_slot ? *resp_slot : 0;
+    int32_t verify = verify_slot ? *verify_slot : 0;
+    int32_t status = status_slot ? *status_slot : 32767;
+    bool has_current_response = resp_event > 0 && (add_event == 0 || resp_event >= add_event);
+    bool synced = has_current_response && stage_sync_status_means_synced(status);
+
+    if (verify) {
+        if (reason && reason_size) snprintf(reason, reason_size, "login_verify mode=%d status=%d add=%llu resp=%llu",
+                                            mode, status,
+                                            static_cast<unsigned long long>(add_event),
+                                            static_cast<unsigned long long>(resp_event));
+        return false;
+    }
+    if (!synced) {
+        if (reason && reason_size) snprintf(reason, reason_size, "no_synced_response mode=%d status=%d add=%llu resp=%llu",
+                                            mode, status,
+                                            static_cast<unsigned long long>(add_event),
+                                            static_cast<unsigned long long>(resp_event));
+        return false;
+    }
+    if (reason && reason_size) snprintf(reason, reason_size, "synced mode=%d status=%d", mode, status);
+    return true;
+}
+
+static int32_t read_stage_current(void* thiz) {
+    return thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x30) : 0;
+}
+
+static int32_t read_stage_max(void* thiz) {
+    return thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x3C) : 0;
+}
+
+static int32_t read_stage_mode(void* thiz) {
+    return thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x48) : 0;
+}
+
+static void log_stage_transition(const char* source, void* thiz, int32_t value, int32_t max_before, int32_t max_after) {
+    int32_t current = read_stage_current(thiz);
+    int32_t mode = read_stage_mode(thiz);
+    g_last_free_story_stage_current = current;
+    g_last_free_story_stage_max_before = max_before;
+    g_last_free_story_stage_value = value;
+    g_last_free_story_stage_max_after = max_after;
+    g_last_free_story_stage_mode = mode;
+    append_trace("stage_%s current=%d max_before=%d value=%d max_after=%d mode=%d",
+                 source ? source : "unknown", current, max_before, value, max_after, mode);
+}
+
+static void log_net_response(const char* source, void* response) {
+    if (!response) return;
+    uint8_t* base = reinterpret_cast<uint8_t*>(response);
+    void* data = *reinterpret_cast<void**>(base + 0x10);
+    void* error = *reinterpret_cast<void**>(base + 0x18);
+    int32_t errorid = *reinterpret_cast<int32_t*>(base + 0x20);
+    if (data && g_cresp_item_packet_class && is_instance_of_class(data, g_cresp_item_packet_class)) {
+        uint8_t* item = reinterpret_cast<uint8_t*>(data);
+        void* comm_msg = *reinterpret_cast<void**>(item + 0x10);
+        uint16_t packet_type = *reinterpret_cast<uint16_t*>(item + 0x20);
+        int32_t status = 32767;
+        if (comm_msg) {
+            status = static_cast<int32_t>(static_cast<int16_t>(
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(comm_msg) + 0x10)));
+        }
+        append_trace("net_response source=%s item_type=%u status=%d errorid=%d has_error=%d",
+                     source ? source : "unknown",
+                     static_cast<unsigned>(packet_type), status, errorid, error ? 1 : 0);
+        stage_sync_mark_response(packet_type, status, errorid);
+        return;
+    }
+    if (error || errorid != 0) {
+        int32_t status = 32767;
+        if (error) {
+            status = static_cast<int32_t>(static_cast<int16_t>(
+                *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(error) + 0x10)));
+        }
+        append_trace("net_response source=%s non_item status=%d errorid=%d has_data=%d",
+                     source ? source : "unknown", status, errorid, data ? 1 : 0);
+    }
+}
+
+static bool scoped_life_trans_packet(void* packet) {
+    if (!packet || !g_in_free_story_send_use_key) return false;
+    if (!g_clife_trans_packet_class) return true;
+    return is_instance_of_class(packet, g_clife_trans_packet_class);
+}
+
+static void hk_https_do_callback(void* thiz, void* callback, void* response, void* method) {
+    log_net_response("http_callback", response);
+    if (g_orig_https_do_callback) g_orig_https_do_callback(thiz, callback, response, method);
+}
+
+static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, void* callback, void* method) {
+    if (log_creq_item_packet("send3", packet, sendtype)) {
+        bump(g_hit_free_story_req_item_send);
+    }
+    if (g_enable_free_story && scoped_life_trans_packet(packet)) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(packet);
+        uint16_t* material = reinterpret_cast<uint16_t*>(base + 0x2C);
+        uint8_t* type = reinterpret_cast<uint8_t*>(base + 0x2E);
+        uint8_t* offline = reinterpret_cast<uint8_t*>(base + 0x2F);
+        uint32_t* battle_trans_id = reinterpret_cast<uint32_t*>(base + 0x30);
+        uint16_t* chap_id = reinterpret_cast<uint16_t*>(base + 0x34);
+
+        g_last_free_story_life_sendtype = sendtype;
+        g_last_free_story_life_material_before = *material;
+        g_last_free_story_life_type = *type;
+        g_last_free_story_life_battle_trans_id = *battle_trans_id;
+        g_last_free_story_life_chap_id = *chap_id;
+
+        if (*type == 1 && *material > 0) {
+            *material = 0;
+            bump(g_hit_free_story_life_packet_zeroed);
+            append_trace("life_start source=send3 sendtype=%d type=%u offline=%u material=%d->0 battleTrans=%u chap=%u",
+                         sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*offline),
+                         static_cast<int>(g_last_free_story_life_material_before),
+                         static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+            LOGD("FreeStory CLifeTransPacket zeroed sendtype=%d type=%u material=%d->0 battleTrans=%u chap=%u",
+                 sendtype, static_cast<unsigned>(*type),
+                 static_cast<int>(g_last_free_story_life_material_before),
+                 static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+        } else {
+            bump(g_hit_free_story_life_packet_passthrough);
+            append_trace("life_start source=send3 sendtype=%d type=%u offline=%u material=%u passthrough battleTrans=%u chap=%u",
+                         sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*offline),
+                         static_cast<unsigned>(*material),
+                         static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+            LOGD("FreeStory CLifeTransPacket passthrough sendtype=%d type=%u material=%u battleTrans=%u chap=%u",
+                 sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*material),
+                 static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+        }
+        g_last_free_story_life_material_after = *material;
+    }
+
+    if (g_orig_netmanager_send_internal_object) {
+        g_orig_netmanager_send_internal_object(packet, sendtype, callback, method);
+    }
+}
+
+static void hk_netmanager_send_internal_object_retry(void* packet, int32_t sendtype, int32_t count, int32_t time, void* callback, void* method) {
+    if (log_creq_item_packet("send5", packet, sendtype)) {
+        bump(g_hit_free_story_req_item_retry_send);
+        append_trace("creq_item_retry count=%d time=%d", count, time);
+    }
+    if (g_orig_netmanager_send_internal_object_retry) {
+        g_orig_netmanager_send_internal_object_retry(packet, sendtype, count, time, callback, method);
+    }
+}
+
+static void hk_netmanager_send_internal_cache(void* senddata, void* callback, void* method) {
+    if (senddata) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(senddata);
+        uint16_t sendcode = *reinterpret_cast<uint16_t*>(base + 0x10);
+        int32_t trycount = *reinterpret_cast<int32_t*>(base + 0x14);
+        void* data = *reinterpret_cast<void**>(base + 0x18);
+        if (log_creq_item_packet("cache", data, sendcode)) {
+            bump(g_hit_free_story_req_item_cache_send);
+            append_trace("netcache sendcode=%u trycount=%d", static_cast<unsigned>(sendcode), trycount);
+        }
+    }
+    if (g_orig_netmanager_send_internal_cache) {
+        g_orig_netmanager_send_internal_cache(senddata, callback, method);
+    }
+}
+
+// Tier S.1 — preserve the original battle-start path but make its life/key
+// transaction zero-cost. Blocking send_use_key entirely preserves keys but also
+// prevents the server from seeing a battle start, so completed stage progress
+// gets overwritten by the old server state on next login.
+static void hk_send_use_key(void* method) {
+    if (g_enable_free_story) {
+        bump(g_hit_free_story_send_original);
+        append_trace("send_use_key original_scoped");
+        LOGD("FreeStory send_use_key original with zero-cost life transaction");
+        bool previous = g_in_free_story_send_use_key;
+        g_in_free_story_send_use_key = true;
+        if (g_orig_send_use_key) g_orig_send_use_key(method);
+        g_in_free_story_send_use_key = previous;
+        return;
+    }
+    bump(g_hit_free_story_passthrough);
+    append_trace("send_use_key passthrough");
+    LOGD("FreeStory send_use_key passthrough");
+    if (g_orig_send_use_key) g_orig_send_use_key(method);
+}
+
+// Tier S.2 hook 1 — defense in depth. If the user opts in, drop negative deltas
+// applied through LocalSave.Modify_Key so any code path other than send_use_key
+// that tries to predictively deduct Keys also no-ops. Positive deltas (Ad/Buy
+// refills, shop grants) still pass through untouched.
+static void hk_localsave_modify_key(void* thiz, int64_t key, bool over, void* method) {
+    g_last_free_story_modify_delta = key;
+    g_last_free_story_modify_over = over ? 1 : 0;
+    bool block_predictive = key < 0 &&
+        (g_enable_free_story_skip_predictive || (g_enable_free_story && g_in_free_story_send_use_key));
+    if (block_predictive) {
+        bump(g_hit_free_story_modify_blocked);
+        append_trace("modify_key blocked delta=%lld over=%d scoped=%d",
+                     static_cast<long long>(key), over ? 1 : 0,
+                     (g_enable_free_story && g_in_free_story_send_use_key) ? 1 : 0);
+        LOGD("FreeStory Modify_Key blocked delta=%lld over=%d scoped=%d",
+             static_cast<long long>(key), over ? 1 : 0,
+             (g_enable_free_story && g_in_free_story_send_use_key) ? 1 : 0);
+        return;
+    }
+    bump(g_hit_free_story_modify_passthrough);
+    if (key < 0) {
+        append_trace("modify_key passthrough delta=%lld over=%d",
+                     static_cast<long long>(key), over ? 1 : 0);
+    }
+    LOGD("FreeStory Modify_Key passthrough delta=%lld over=%d",
+         static_cast<long long>(key), over ? 1 : 0);
+    if (g_orig_localsave_modify_key) g_orig_localsave_modify_key(thiz, key, over, method);
+}
+
+// Tier S.2 hook 2 — defense in depth. If the user opts in, block authoritative
+// resync writes that would *lower* the displayed Key (e.g. DoLoginCallBack
+// pushing a freshly-deducted server value into UserInfo). Increases (initial
+// login bootstrap, shop/ad refills) still pass through so the display reflects
+// real gains. Falls back to passthrough if the Key field offset failed to
+// resolve, so a metadata regression cannot accidentally permanent-freeze keys.
+static void hk_userinfo_set_key(void* thiz, int32_t value, void* method) {
+    bool have_current = thiz && g_off_localsave_userinfo_key;
+    int32_t current = 0;
+    if (have_current) {
+        current = *reinterpret_cast<int32_t*>(
+            reinterpret_cast<uint8_t*>(thiz) + g_off_localsave_userinfo_key);
+    }
+    g_last_free_story_set_key_current = current;
+    g_last_free_story_set_key_value = value;
+    g_last_free_story_set_key_had_offset = have_current ? 1 : 0;
+    if (have_current && value < current) {
+        bump(g_hit_free_story_set_key_lower_attempt);
+        append_trace("set_key lower_attempt current=%d value=%d freeze=%d",
+                     current, value, g_enable_free_story_freeze_key ? 1 : 0);
+    }
+    if (g_enable_free_story_freeze_key && have_current) {
+        if (value < current) {
+            bump(g_hit_free_story_set_key_blocked);
+            append_trace("set_key blocked current=%d value=%d", current, value);
+            LOGD("FreeStory SetKey blocked current=%d value=%d", current, value);
+            return;
+        }
+    }
+    bump(g_hit_free_story_set_key_passthrough);
+    LOGD("FreeStory SetKey passthrough current=%d value=%d have_current=%d",
+         current, value, have_current ? 1 : 0);
+    if (g_orig_userinfo_set_key) g_orig_userinfo_set_key(thiz, value, method);
+}
+
+static int32_t read_userinfo_ad_key_count(void* thiz) {
+    if (!thiz || !g_off_localsave_userinfo_ad_key_count) return -1;
+    return *reinterpret_cast<int32_t*>(
+        reinterpret_cast<uint8_t*>(thiz) + g_off_localsave_userinfo_ad_key_count);
+}
+
+static int32_t get_localsave_ad_key_count(void* thiz, void* method) {
+    if (!g_orig_localsave_userinfo_get_ad_key_count) return -1;
+    return g_orig_localsave_userinfo_get_ad_key_count(thiz, method);
+}
+
+static void hk_userinfo_set_ad_key_count_direct(void* thiz, int32_t value, void* method) {
+    int32_t current = read_userinfo_ad_key_count(thiz);
+    g_last_ad_energy_current = current;
+    g_last_ad_energy_value = value;
+    if (g_preserve_ad_energy && current >= 0 && value < current) {
+        bump(g_hit_ad_energy_set_blocked);
+        append_trace("ad_energy direct_set blocked current=%d value=%d", current, value);
+        return;
+    }
+    bump(g_hit_ad_energy_set_passthrough);
+    if (g_orig_userinfo_set_ad_key_count_direct) {
+        g_orig_userinfo_set_ad_key_count_direct(thiz, value, method);
+    }
+}
+
+static int32_t hk_userinfo_get_ad_key_count_direct(void* thiz, void* method) {
+    int32_t result = g_orig_userinfo_get_ad_key_count_direct ?
+        g_orig_userinfo_get_ad_key_count_direct(thiz, method) : read_userinfo_ad_key_count(thiz);
+    g_last_ad_energy_result = result;
+    bump(g_hit_ad_energy_get);
+    return result;
+}
+
+static void hk_localsave_userinfo_set_ad_key_count(void* thiz, int32_t value, void* method) {
+    int32_t current = get_localsave_ad_key_count(thiz, method);
+    g_last_ad_energy_current = current;
+    g_last_ad_energy_value = value;
+    if (g_preserve_ad_energy && current >= 0 && value < current) {
+        bump(g_hit_ad_energy_set_blocked);
+        append_trace("ad_energy wrapper_set blocked current=%d value=%d", current, value);
+        return;
+    }
+    bump(g_hit_ad_energy_set_passthrough);
+    if (g_orig_localsave_userinfo_set_ad_key_count) {
+        g_orig_localsave_userinfo_set_ad_key_count(thiz, value, method);
+    }
+}
+
+static int32_t hk_localsave_userinfo_get_ad_key_count(void* thiz, void* method) {
+    int32_t result = get_localsave_ad_key_count(thiz, method);
+    g_last_ad_energy_result = result;
+    bump(g_hit_ad_energy_get);
+    return result;
+}
+
+static bool hk_localsave_userinfo_use_ad_key_count(void* thiz, void* method) {
+    int32_t current = get_localsave_ad_key_count(thiz, method);
+    g_last_ad_energy_current = current;
+    if (g_preserve_ad_energy) {
+        bump(g_hit_ad_energy_use_blocked);
+        append_trace("ad_energy use blocked current=%d", current);
+        return true;
+    }
+    bump(g_hit_ad_energy_use_passthrough);
+    return g_orig_localsave_userinfo_use_ad_key_count ?
+        g_orig_localsave_userinfo_use_ad_key_count(thiz, method) : false;
+}
+
+static bool hk_crespitempacket_get_is_success(void* thiz, void* method) {
+    bool success = g_orig_crespitempacket_get_is_success ?
+        g_orig_crespitempacket_get_is_success(thiz, method) : false;
+    uint16_t packet_type = 0;
+    uint16_t status = 0xffff;
+    if (thiz) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(thiz);
+        void* comm_msg = *reinterpret_cast<void**>(base + 0x10);
+        packet_type = *reinterpret_cast<uint16_t*>(base + 0x20);
+        if (comm_msg) {
+            status = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(comm_msg) + 0x10);
+        }
+    }
+    g_last_free_story_resp_packet_type = packet_type;
+    g_last_free_story_resp_status = static_cast<int32_t>(static_cast<int16_t>(status));
+    g_last_free_story_resp_success = success ? 1 : 0;
+    if (success) {
+        bump(g_hit_free_story_resp_item_success);
+    } else {
+        bump(g_hit_free_story_resp_item_failure);
+    }
+    append_trace("cresp_item is_success=%d packet_type=%u status=%d",
+                 success ? 1 : 0, static_cast<unsigned>(packet_type),
+                 static_cast<int>(static_cast<int16_t>(status)));
+    LOGD("FreeStory CRespItemPacket IsSuccess=%d packet_type=%u status=%d",
+         success ? 1 : 0, static_cast<unsigned>(packet_type),
+         static_cast<int>(static_cast<int16_t>(status)));
+    return success;
+}
+
+static void hk_stage_init_max_level(void* thiz, int32_t value, void* method) {
+    int32_t before = read_stage_max(thiz);
+    int32_t mode = read_stage_mode(thiz);
+    int32_t effective = stage_guard_effective_init_max(mode, value, before);
+    if (g_orig_stage_init_max_level) g_orig_stage_init_max_level(thiz, effective, method);
+    int32_t after = read_stage_max(thiz);
+    bump(g_hit_free_story_stage_init_max);
+    log_stage_transition("init_max", thiz, effective, before, after);
+    stage_guard_observe(read_stage_mode(thiz), after);
+}
+
+static void hk_stage_update_max_level(void* thiz, int32_t value, void* method) {
+    int32_t before = read_stage_max(thiz);
+    if (g_orig_stage_update_max_level) g_orig_stage_update_max_level(thiz, value, method);
+    int32_t after = read_stage_max(thiz);
+    bump(g_hit_free_story_stage_update_max);
+    log_stage_transition("update_max", thiz, value, before, after);
+    stage_guard_observe(read_stage_mode(thiz), after);
+}
+
+static void hk_stage_init_next_id(void* thiz, int32_t value, void* method) {
+    int32_t before = read_stage_current(thiz);
+    int32_t max_before = read_stage_max(thiz);
+    int32_t mode = read_stage_mode(thiz);
+    if (g_orig_stage_init_next_id) g_orig_stage_init_next_id(thiz, value, method);
+    int32_t after = read_stage_current(thiz);
+    bump(g_hit_free_story_stage_init_next);
+    append_trace("stage_init_next current_before=%d value=%d current_after=%d max_before=%d mode=%d",
+                 before, value, after, max_before, mode);
+}
+
+static void hk_stage_rollback_next_stage(void* thiz, void* method) {
+    int32_t current = read_stage_current(thiz);
+    int32_t max_level = read_stage_max(thiz);
+    int32_t mode = read_stage_mode(thiz);
+    if (g_enable_stage_progress_guard && is_story_stage_mode(mode)) {
+        bump(g_hit_stage_guard_rollback_blocked);
+        append_trace("stage_rollback blocked current=%d max=%d mode=%d", current, max_level, mode);
+        stage_guard_observe(mode, max_level);
+        return;
+    }
+    append_trace("stage_rollback passthrough current=%d max=%d mode=%d", current, max_level, mode);
+    if (g_orig_stage_rollback_next_stage) g_orig_stage_rollback_next_stage(thiz, method);
+}
+
+static void hk_equipdata_add_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_add);
+    log_creq_item_packet("gameover_add", packet, -1);
+    stage_sync_mark_gameover_add(packet);
+    if (g_orig_equipdata_add_gameover_packet) g_orig_equipdata_add_gameover_packet(thiz, packet, method);
+}
+
+static void hk_equipdata_remove_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_remove);
+    log_creq_item_packet("gameover_remove", packet, -1);
+    char reason[160];
+    if (!stage_sync_can_remove(packet, reason, sizeof(reason))) {
+        bump(g_hit_stage_sync_remove_held);
+        append_trace("stage_sync remove_held type=%u trans=%u reason=%s",
+                     static_cast<unsigned>(read_creq_item_packet_type(packet)),
+                     static_cast<unsigned>(read_creq_item_trans_id(packet)),
+                     reason);
+        return;
+    }
+    if (is_story_gameover_packet_type(read_creq_item_packet_type(packet))) {
+        bump(g_hit_stage_sync_remove_allowed);
+        append_trace("stage_sync remove_allowed type=%u trans=%u reason=%s",
+                     static_cast<unsigned>(read_creq_item_packet_type(packet)),
+                     static_cast<unsigned>(read_creq_item_trans_id(packet)),
+                     reason);
+    }
+    if (g_orig_equipdata_remove_gameover_packet) g_orig_equipdata_remove_gameover_packet(thiz, packet, method);
+}
+
+static void hk_equipdata_check_cached_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_check);
+    log_creq_item_packet("gameover_check", packet, -1);
+    stage_sync_mark_gameover_add(packet);
+    if (g_orig_equipdata_check_cached_gameover_packet) g_orig_equipdata_check_cached_gameover_packet(thiz, packet, method);
 }
 
 static bool is_gold_drop_type(int32_t type) {
@@ -3957,6 +4960,9 @@ static void* hack_thread(void*) {
     resolve_traversal_helpers(il2cpp_base);
     resolve_movement_helpers(il2cpp_base);
     resolve_ad_helpers(il2cpp_base);
+    g_clife_trans_packet_class = resolve_class_by_metadata_name("GameProtocol", "CLifeTransPacket");
+    g_creq_item_packet_class = resolve_class_by_metadata_name("GameProtocol", "CReqItemPacket");
+    g_cresp_item_packet_class = resolve_class_by_metadata_name("GameProtocol", "CRespItemPacket");
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
     HOOK_FN(il2cpp_base, rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, hk_get_atk_base, g_orig_get_atk_base);
@@ -3990,8 +4996,28 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, hk_wrapped_adapter_show_callback_source, g_orig_wrapped_adapter_show_callback_source);
     HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, hk_rewarded_high_ecpm_is_loaded, g_orig_rewarded_high_ecpm_is_loaded);
     HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_show, hk_rewarded_high_ecpm_show, g_orig_rewarded_high_ecpm_show);
+    HOOK_FN(il2cpp_base, rva::HTTPSendClient_DoCallback, hk_https_do_callback, g_orig_https_do_callback);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Object, hk_netmanager_send_internal_object, g_orig_netmanager_send_internal_object);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Object_Retry, hk_netmanager_send_internal_object_retry, g_orig_netmanager_send_internal_object_retry);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Cache, hk_netmanager_send_internal_cache, g_orig_netmanager_send_internal_cache);
+    HOOK_FN(il2cpp_base, rva::GameLogic_send_use_key, hk_send_use_key, g_orig_send_use_key);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Modify_Key, hk_localsave_modify_key, g_orig_localsave_modify_key);
+    HOOK_FN(il2cpp_base, rva::CRespItemPacket_get_IsSuccess, hk_crespitempacket_get_is_success, g_orig_crespitempacket_get_is_success);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_AddGameOverPacket, hk_equipdata_add_gameover_packet, g_orig_equipdata_add_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_RemoveGameOverPacket, hk_equipdata_remove_gameover_packet, g_orig_equipdata_remove_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_CheckCachedGameOverPacket, hk_equipdata_check_cached_gameover_packet, g_orig_equipdata_check_cached_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_InitMaxLevel, hk_stage_init_max_level, g_orig_stage_init_max_level);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_UpdateMaxLevel, hk_stage_update_max_level, g_orig_stage_update_max_level);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_InitNextID, hk_stage_init_next_id, g_orig_stage_init_next_id);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_RollbackNextStage, hk_stage_rollback_next_stage, g_orig_stage_rollback_next_stage);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetKey, hk_userinfo_set_key, g_orig_userinfo_set_key);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetAdKeyCount_Direct, hk_userinfo_set_ad_key_count_direct, g_orig_userinfo_set_ad_key_count_direct);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_GetAdKeyCount_Direct, hk_userinfo_get_ad_key_count_direct, g_orig_userinfo_get_ad_key_count_direct);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetAdKeyCount, hk_localsave_userinfo_set_ad_key_count, g_orig_localsave_userinfo_set_ad_key_count);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_GetAdKeyCount, hk_localsave_userinfo_get_ad_key_count, g_orig_localsave_userinfo_get_ad_key_count);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_UseAdKeyCount, hk_localsave_userinfo_use_ad_key_count, g_orig_localsave_userinfo_use_ad_key_count);
     g_startup_hooks_ready = true;
 
     if (g_install_gold_hooks) {
