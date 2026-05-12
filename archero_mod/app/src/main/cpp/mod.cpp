@@ -287,6 +287,12 @@ static constexpr uintptr_t LocalSave_BattleIn_CanDropEquip = 0x5A4FA98;
 static constexpr uintptr_t LocalSave_get_CanDropType501Equip = 0x5A5B448;
 static constexpr uintptr_t LocalSave_get_CanDropType401Or402Equip = 0x5A5B03C;
 static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
+// Free Story shield: silence the outgoing key-consumption packet and (optionally)
+// shield the local Key state from authoritative resync writes. RVAs validated
+// against the 7.9.1 Il2CppDumper dump (see docs/free-story-shield.md).
+static constexpr uintptr_t GameLogic_send_use_key = 0x58CB67C;
+static constexpr uintptr_t LocalSave_Modify_Key = 0x5A494C4;
+static constexpr uintptr_t LocalSave_UserInfo_SetKey = 0x5B1E9E8;
 }
 
 static constexpr uintptr_t kIl2CppObjectHeaderSize = 0x10;
@@ -323,6 +329,7 @@ static uintptr_t g_off_obscured_vector3_hidden = 0;
 static uintptr_t g_off_obscured_vector3_inited = 0;
 static uintptr_t g_off_obscured_vector3_fake = 0;
 static uintptr_t g_off_obscured_vector3_fake_active = 0;
+static uintptr_t g_off_localsave_userinfo_key = 0;
 
 static constexpr int kEntityTypeHero = 1;
 static constexpr int32_t kSkillWalkThroughWater = 2080;
@@ -348,6 +355,15 @@ static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
 static volatile bool g_enable_move_speed = true;
 static volatile bool g_skip_rewarded_ads = true;
+// Free Story shield (S.1): drop the outbound key-consumption packet entirely so
+// the server never observes the play and never deducts the player's Key.
+static volatile bool g_enable_free_story = true;
+// Defensive co-hook (S.2 hook 2): refuse Key resync writes that would lower
+// the displayed Key. Off by default — S.1 keeps server-truth in sync already.
+static volatile bool g_enable_free_story_freeze_key = false;
+// Defensive co-hook (S.2 hook 1): drop negative deltas into LocalSave.Modify_Key
+// so the client cannot predictively deduct ahead of the (skipped) server reply.
+static volatile bool g_enable_free_story_skip_predictive = false;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
 static volatile bool g_tiny_direct_patch = false;
@@ -450,6 +466,10 @@ static volatile uint64_t g_hit_ad_skip_driver = 0;
 static volatile uint64_t g_hit_ad_skip_reward = 0;
 static volatile uint64_t g_hit_ad_skip_close = 0;
 static volatile uint64_t g_hit_ad_skip_passthrough = 0;
+static volatile uint64_t g_hit_free_story_send_blocked = 0;
+static volatile uint64_t g_hit_free_story_modify_blocked = 0;
+static volatile uint64_t g_hit_free_story_set_key_blocked = 0;
+static volatile uint64_t g_hit_free_story_passthrough = 0;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
@@ -1363,6 +1383,7 @@ static void resolve_runtime_field_offsets() {
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive");
+    RESOLVE_FIELD_OFFSET(g_off_localsave_userinfo_key, "", "LocalSave.UserInfo", "<Key>k__BackingField");
 
 #undef RESOLVE_VALUE_FIELD_OFFSET
 #undef RESOLVE_FIELD_OFFSET
@@ -1639,6 +1660,9 @@ static const HookSpec kHookSpecs[] = {
     {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr},
+    {rva::GameLogic_send_use_key, "", "GameLogic", "send_use_key", 0, nullptr},
+    {rva::LocalSave_Modify_Key, "", "LocalSave", "Modify_Key", 2, nullptr},
+    {rva::LocalSave_UserInfo_SetKey, "", "LocalSave.UserInfo", "SetKey", 1, nullptr},
 };
 
 static const HookSpec* find_hook_spec(uintptr_t rva_value) {
@@ -1779,6 +1803,9 @@ static bool write_default_config_file(const char* path) {
         "move_speed=1\n"
         "move_speed_multiplier=1\n"
         "skip_rewarded_ads=1\n"
+        "free_story=1\n"
+        "free_story_freeze_key=0\n"
+        "free_story_skip_predictive=0\n"
         "install_gold_hooks=0\n"
         "tiny_direct_patch=0\n"
         "gold_add_scale=0\n"
@@ -1912,6 +1939,9 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
     else if (strcmp(key, "move_speed") == 0) g_enable_move_speed = parse_bool_value(value);
     else if (strcmp(key, "skip_rewarded_ads") == 0) g_skip_rewarded_ads = parse_bool_value(value);
+    else if (strcmp(key, "free_story") == 0) g_enable_free_story = parse_bool_value(value);
+    else if (strcmp(key, "free_story_freeze_key") == 0) g_enable_free_story_freeze_key = parse_bool_value(value);
+    else if (strcmp(key, "free_story_skip_predictive") == 0) g_enable_free_story_skip_predictive = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "tiny_direct_patch") == 0) g_tiny_direct_patch = parse_bool_value(value);
     else if (strcmp(key, "gold_add_scale") == 0) g_gold_add_scale = parse_bool_value(value);
@@ -2042,6 +2072,9 @@ static void write_status_file_once() {
     fprintf(f, "move_speed=%d\n", g_enable_move_speed ? 1 : 0);
     fprintf(f, "move_speed_multiplier=%f\n", static_cast<double>(g_move_speed_multiplier));
     fprintf(f, "skip_rewarded_ads=%d\n", g_skip_rewarded_ads ? 1 : 0);
+    fprintf(f, "free_story=%d\n", g_enable_free_story ? 1 : 0);
+    fprintf(f, "free_story_freeze_key=%d\n", g_enable_free_story_freeze_key ? 1 : 0);
+    fprintf(f, "free_story_skip_predictive=%d\n", g_enable_free_story_skip_predictive ? 1 : 0);
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
     fprintf(f, "hook_installed_count=%llu\n", static_cast<unsigned long long>(g_hook_installed_count));
@@ -2072,6 +2105,8 @@ static void write_status_file_once() {
             static_cast<unsigned long>(g_off_obscured_vector3_inited),
             static_cast<unsigned long>(g_off_obscured_vector3_fake),
             static_cast<unsigned long>(g_off_obscured_vector3_fake_active));
+    fprintf(f, "field_offsets.localsave_userinfo_key=0x%lx\n",
+            static_cast<unsigned long>(g_off_localsave_userinfo_key));
     fprintf(f, "direct_patch.resolved=%llu\n", static_cast<unsigned long long>(g_direct_patch_resolved_count));
     fprintf(f, "direct_patch.writes=%llu\n", static_cast<unsigned long long>(g_direct_patch_write_count));
     fprintf(f, "direct_patch.fail=%llu\n", static_cast<unsigned long long>(g_direct_patch_fail_count));
@@ -2154,6 +2189,10 @@ static void write_status_file_once() {
     fprintf(f, "hits.ad_skip_reward=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_reward));
     fprintf(f, "hits.ad_skip_close=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_close));
     fprintf(f, "hits.ad_skip_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_passthrough));
+    fprintf(f, "hits.free_story_send_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_send_blocked));
+    fprintf(f, "hits.free_story_modify_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_modify_blocked));
+    fprintf(f, "hits.free_story_set_key_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_blocked));
+    fprintf(f, "hits.free_story_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_passthrough));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2358,6 +2397,13 @@ using AdapterShowCallbackFn = bool (*)(void* thiz, void* callback, void* method)
 using AdapterShowCallbackSourceFn = bool (*)(void* thiz, void* callback, int32_t source, void* method);
 using RewardedHighEcpmIsLoadedFn = bool (*)(void* method);
 using RewardedHighEcpmShowFn = void (*)(void* callback, int32_t source, void* method);
+// Free Story shield typedefs. send_use_key is a private static void with no
+// managed args; Modify_Key/SetKey are instance methods on LocalSave and on the
+// nested LocalSave.UserInfo respectively. The trailing void* method pointer is
+// the hidden IL2CPP MethodInfo* argument the runtime appends to every call.
+using StaticVoidNoArgFn = void (*)(void* method);
+using LocalSaveModifyKeyFn = void (*)(void* thiz, int64_t key, bool over, void* method);
+using UserInfoSetKeyFn = void (*)(void* thiz, int32_t value, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
 static GetMissFn g_orig_get_miss = nullptr;
 static UpgradeBaseIntFn g_orig_get_atk_base = nullptr;
@@ -2405,6 +2451,9 @@ static AdapterShowCallbackFn g_orig_wrapped_adapter_show_callback = nullptr;
 static AdapterShowCallbackSourceFn g_orig_wrapped_adapter_show_callback_source = nullptr;
 static RewardedHighEcpmIsLoadedFn g_orig_rewarded_high_ecpm_is_loaded = nullptr;
 static RewardedHighEcpmShowFn g_orig_rewarded_high_ecpm_show = nullptr;
+static StaticVoidNoArgFn g_orig_send_use_key = nullptr;
+static LocalSaveModifyKeyFn g_orig_localsave_modify_key = nullptr;
+static UserInfoSetKeyFn g_orig_userinfo_set_key = nullptr;
 static void* g_adcallback_control_class = nullptr;
 static void* g_wrappeddriver_class = nullptr;
 static void* g_combineddriver_class = nullptr;
@@ -3177,6 +3226,50 @@ static bool hk_wrapped_adapter_show_callback_source(void* thiz, void* callback, 
     }
     bump(g_hit_ad_skip_passthrough);
     return g_orig_wrapped_adapter_show_callback_source ? g_orig_wrapped_adapter_show_callback_source(thiz, callback, source, method) : false;
+}
+
+// Tier S.1 — swallow the outbound key-consumption packet so the server never
+// receives a play request. Side-effect: the original method's predictive local
+// deduct (Modify_Key) and its DispatchServerRequest call are both skipped, so
+// the displayed Key value never changes and there is no on-the-wire fingerprint
+// distinguishing a real Free Story play from no play at all.
+static void hk_send_use_key(void* method) {
+    if (g_enable_free_story) {
+        bump(g_hit_free_story_send_blocked);
+        return;
+    }
+    bump(g_hit_free_story_passthrough);
+    if (g_orig_send_use_key) g_orig_send_use_key(method);
+}
+
+// Tier S.2 hook 1 — defense in depth. If the user opts in, drop negative deltas
+// applied through LocalSave.Modify_Key so any code path other than send_use_key
+// that tries to predictively deduct Keys also no-ops. Positive deltas (Ad/Buy
+// refills, shop grants) still pass through untouched.
+static void hk_localsave_modify_key(void* thiz, int64_t key, bool over, void* method) {
+    if (g_enable_free_story_skip_predictive && key < 0) {
+        bump(g_hit_free_story_modify_blocked);
+        return;
+    }
+    if (g_orig_localsave_modify_key) g_orig_localsave_modify_key(thiz, key, over, method);
+}
+
+// Tier S.2 hook 2 — defense in depth. If the user opts in, block authoritative
+// resync writes that would *lower* the displayed Key (e.g. DoLoginCallBack
+// pushing a freshly-deducted server value into UserInfo). Increases (initial
+// login bootstrap, shop/ad refills) still pass through so the display reflects
+// real gains. Falls back to passthrough if the Key field offset failed to
+// resolve, so a metadata regression cannot accidentally permanent-freeze keys.
+static void hk_userinfo_set_key(void* thiz, int32_t value, void* method) {
+    if (g_enable_free_story_freeze_key && thiz && g_off_localsave_userinfo_key) {
+        int32_t current = *reinterpret_cast<int32_t*>(
+            reinterpret_cast<uint8_t*>(thiz) + g_off_localsave_userinfo_key);
+        if (value < current) {
+            bump(g_hit_free_story_set_key_blocked);
+            return;
+        }
+    }
+    if (g_orig_userinfo_set_key) g_orig_userinfo_set_key(thiz, value, method);
 }
 
 static bool is_gold_drop_type(int32_t type) {
@@ -3992,6 +4085,9 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_show, hk_rewarded_high_ecpm_show, g_orig_rewarded_high_ecpm_show);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
+    HOOK_FN(il2cpp_base, rva::GameLogic_send_use_key, hk_send_use_key, g_orig_send_use_key);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Modify_Key, hk_localsave_modify_key, g_orig_localsave_modify_key);
+    HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetKey, hk_userinfo_set_key, g_orig_userinfo_set_key);
     g_startup_hooks_ready = true;
 
     if (g_install_gold_hooks) {

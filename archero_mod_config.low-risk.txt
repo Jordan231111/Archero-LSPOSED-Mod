@@ -104,6 +104,37 @@ move_speed_multiplier=1
 # Covers AdCallbackControl, high-eCPM, ALMaxRewardedDriver, WrappedAdapter, and callback-router paths.
 skip_rewarded_ads=1
 
+# free_story
+# Tier S.1 Free Story shield. Swallows GameLogic.send_use_key so the outbound
+# key-consumption packet is never sent. The original method's predictive
+# Modify_Key call is part of send_use_key itself, so dropping the call also
+# skips the local decrement -- the displayed Key count stays put and the
+# server never observes a play, leaving no on-the-wire fingerprint relative
+# to a no-op. Stamina-style "free" stories that gate inside the C# layer
+# (Vip.IsFreeStoryNumValid, IsCanFreeStoryToday) are still entered exactly
+# as the game intended; only the network-side accounting is silenced.
+# 1 enables the shield. 0 lets the original packet through.
+free_story=1
+
+# free_story_freeze_key
+# Defense-in-depth co-hook on LocalSave.UserInfo.SetKey. When ON, refuses
+# any authoritative resync write that would *lower* the displayed Key
+# (e.g. DoLoginCallBack pushing a freshly-deducted server value). Positive
+# writes (initial login bootstrap, ad/shop refills) still pass through so
+# real gains show up correctly. Leave OFF unless server-side accounting
+# already drifted and you need the displayed value frozen until the
+# replacement server is caught up. Safe default: 0.
+free_story_freeze_key=0
+
+# free_story_skip_predictive
+# Defense-in-depth co-hook on LocalSave.Modify_Key. When ON, drops only
+# *negative* deltas so any code path other than send_use_key that tries to
+# predictively decrement Keys is also no-op'd. Positive deltas still pass.
+# free_story=1 already prevents send_use_key from running its predictive
+# Modify_Key(-1), so this is mostly belt-and-suspenders for future paths.
+# Safe default: 0.
+free_story_skip_predictive=0
+
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
 # 1 installs the optional hook families requested below. 0 leaves only startup gameplay hooks.
