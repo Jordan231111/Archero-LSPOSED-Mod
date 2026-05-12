@@ -44,13 +44,33 @@ static constexpr uintptr_t EntityBase_GetOnCalCanMove = 0x4C1FD90;
 static constexpr uintptr_t EntityBase_SetCollider = 0x4C23850;
 static constexpr uintptr_t EntityBase_SetFlyAll = 0x4C23A34;
 static constexpr uintptr_t EntityBase_CheckPos = 0x4C29A60;
+static constexpr uintptr_t EntityBase_SelfMoveBy = 0x4C2979C;
 static constexpr uintptr_t EntityBase_AddSkill = 0x4C320FC;
 static constexpr uintptr_t EntityBase_ContainsSkill = 0x4C23308;
 static constexpr uintptr_t EntityBase_AddInitSkills = 0x4C33C78;
 static constexpr uintptr_t EntityHitCtrl_SetFlyOne = 0x53094B4;
 static constexpr uintptr_t MoveControl_UpdateProgress = 0x5538124;
+static constexpr uintptr_t AdCallbackControl_IsLoaded = 0x5897EB4;
+static constexpr uintptr_t AdCallbackControl_Show = 0x589851C;
+static constexpr uintptr_t AdCallbackControl_onClose = 0x5898D64;
+static constexpr uintptr_t AdCallbackControl_onReward = 0x5899010;
+static constexpr uintptr_t AdsRequestHelper_ALMaxRewardedDriver_isLoaded = 0x589F24C;
+static constexpr uintptr_t AdsRequestHelper_ALMaxRewardedDriver_Show = 0x589F478;
+static constexpr uintptr_t AdsRequestHelper_WrappedDriver_onClose = 0x58A1038;
+static constexpr uintptr_t AdsRequestHelper_WrappedDriver_onReward = 0x58A1200;
+static constexpr uintptr_t AdsRequestHelper_CombinedDriver_onClose = 0x58A32E0;
+static constexpr uintptr_t AdsRequestHelper_CombinedDriver_onReward = 0x58A3490;
+static constexpr uintptr_t AdsRequestHelper_CallbackRouter_onClose = 0x58A4090;
+static constexpr uintptr_t AdsRequestHelper_CallbackRouter_onReward = 0x58A4758;
+static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_isLoaded = 0x58A4ABC;
+static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_Show = 0x58A4D14;
+static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_Show_Callback = 0x58A4E5C;
+static constexpr uintptr_t AdsRequestHelper_WrappedAdapter_Show_Callback_Source = 0x58A4FB0;
+static constexpr uintptr_t AdsRequestHelper_rewarded_high_eCPM_isLoaded = 0x589C404;
+static constexpr uintptr_t AdsRequestHelper_rewarded_high_eCPM_show = 0x589C518;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetATKBase = 0x5904E60;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase = 0x5905134;
+static constexpr uintptr_t UnityEngine_Time_get_deltaTime = 0x84259B4;
 static constexpr uintptr_t UnityEngine_Time_get_timeScale = 0x8425C64;
 static constexpr uintptr_t UnityEngine_Time_set_timeScale = 0x8425C8C;
 static constexpr uintptr_t EntityData_getGold = 0x4F69AA4;
@@ -283,67 +303,45 @@ static constexpr uintptr_t LocalSave_BattleIn_DropEquipDataByTransId = 0xFE00000
 static constexpr uintptr_t GameOverModeCtrlBase_CheckDropEquipsByServer = 0xFE000005;
 }
 
-static constexpr uintptr_t kEntityDataEntityOffset = 0x18;
-static constexpr uintptr_t kEntityDataFlyStoneCountOffset = 0xA8;
-static constexpr uintptr_t kEntityDataFlyWaterCountOffset = 0xAC;
-static constexpr uintptr_t kEntityBaseDataOffset = 0xB0;
-static constexpr uintptr_t kEntityBaseTypeOffset = 0x11B4;
-static constexpr uintptr_t kEntityBaseFlyWaterOffset = 0x234;
-static constexpr uintptr_t kEntityBaseFlyStoneOffset = 0x235;
-static constexpr uintptr_t kEntityBaseHitCtrlOffset = 0xD70;
-static constexpr uintptr_t kEntityBaseMoveLayerMaskOffset = 0xE98;
-static constexpr uintptr_t kEntityHitCtrlEntityOffset = 0x10;
-static constexpr uintptr_t kBulletTransmitEntityOffset = 0x50;
-static constexpr uintptr_t kBulletTransmitWeaponDataOffset = 0x58;
-static constexpr uintptr_t kBulletTransmitThroughWallOffset = 0xC8;
-static constexpr uintptr_t kWeaponWeaponThroughWallOffset = 0x346;
-static constexpr uintptr_t kWeaponWeaponThroughInsideWallOffset = 0x348;
-static constexpr uintptr_t kBulletBaseEntityOffset = 0x88;
-static constexpr uintptr_t kBulletBaseWeaponDataOffset = 0xA0;
-static constexpr uintptr_t kBulletBaseTransmitOffset = 0xA8;
-static constexpr uintptr_t kMoveControlEntityOffset = 0x10;
-static constexpr uintptr_t kMoveControlMoveDirectionOffset = 0x70;
 static constexpr uintptr_t kIl2CppObjectHeaderSize = 0x10;
-static constexpr uintptr_t kObscuredVector3KeyOffset = 0x0;
-static constexpr uintptr_t kObscuredVector3HiddenOffset = 0x4;
-static constexpr uintptr_t kObscuredVector3InitedOffset = 0x10;
-static constexpr uintptr_t kObscuredVector3FakeOffset = 0x14;
-static constexpr uintptr_t kObscuredVector3FakeActiveOffset = 0x20;
 static constexpr int32_t kMoveProgressMaxSubsteps = 20;
 static constexpr float kMoveProgressFractionEpsilon = 0.05f;
 
-static uintptr_t g_off_entity_data_entity = kEntityDataEntityOffset;
-static uintptr_t g_off_entity_data_fly_stone_count = kEntityDataFlyStoneCountOffset;
-static uintptr_t g_off_entity_data_fly_water_count = kEntityDataFlyWaterCountOffset;
-static uintptr_t g_off_entity_base_data = kEntityBaseDataOffset;
-static uintptr_t g_off_entity_base_type = kEntityBaseTypeOffset;
-static uintptr_t g_off_entity_base_fly_water = kEntityBaseFlyWaterOffset;
-static uintptr_t g_off_entity_base_fly_stone = kEntityBaseFlyStoneOffset;
-static uintptr_t g_off_entity_base_hit_ctrl = kEntityBaseHitCtrlOffset;
-static uintptr_t g_off_entity_base_move_layer_mask = kEntityBaseMoveLayerMaskOffset;
-static uintptr_t g_off_entity_hit_ctrl_entity = kEntityHitCtrlEntityOffset;
-static uintptr_t g_off_bullet_transmit_entity = kBulletTransmitEntityOffset;
-static uintptr_t g_off_bullet_transmit_weapon_data = kBulletTransmitWeaponDataOffset;
-static uintptr_t g_off_bullet_transmit_through_wall = kBulletTransmitThroughWallOffset;
-static uintptr_t g_off_weapon_weapon_through_wall = kWeaponWeaponThroughWallOffset;
-static uintptr_t g_off_weapon_weapon_through_inside_wall = kWeaponWeaponThroughInsideWallOffset;
-static uintptr_t g_off_bullet_base_entity = kBulletBaseEntityOffset;
-static uintptr_t g_off_bullet_base_weapon_data = kBulletBaseWeaponDataOffset;
-static uintptr_t g_off_bullet_base_transmit = kBulletBaseTransmitOffset;
-static uintptr_t g_off_move_control_entity = kMoveControlEntityOffset;
-static uintptr_t g_off_move_control_move_direction = kMoveControlMoveDirectionOffset;
-static uintptr_t g_off_obscured_vector3_key = kObscuredVector3KeyOffset;
-static uintptr_t g_off_obscured_vector3_hidden = kObscuredVector3HiddenOffset;
-static uintptr_t g_off_obscured_vector3_inited = kObscuredVector3InitedOffset;
-static uintptr_t g_off_obscured_vector3_fake = kObscuredVector3FakeOffset;
-static uintptr_t g_off_obscured_vector3_fake_active = kObscuredVector3FakeActiveOffset;
+static uintptr_t g_off_entity_data_entity = 0;
+static uintptr_t g_off_entity_data_fly_stone_count = 0;
+static uintptr_t g_off_entity_data_fly_water_count = 0;
+static uintptr_t g_off_entity_base_data = 0;
+static uintptr_t g_off_entity_base_type = 0;
+static uintptr_t g_off_entity_base_fly_water = 0;
+static uintptr_t g_off_entity_base_fly_stone = 0;
+static uintptr_t g_off_entity_base_hit_ctrl = 0;
+static uintptr_t g_off_entity_base_move_layer_mask = 0;
+static uintptr_t g_off_entity_hit_ctrl_entity = 0;
+static uintptr_t g_off_bullet_transmit_entity = 0;
+static uintptr_t g_off_bullet_transmit_weapon_data = 0;
+static uintptr_t g_off_bullet_transmit_through_wall = 0;
+static uintptr_t g_off_weapon_weapon_through_wall = 0;
+static uintptr_t g_off_weapon_weapon_through_inside_wall = 0;
+static uintptr_t g_off_bullet_base_entity = 0;
+static uintptr_t g_off_bullet_base_weapon_data = 0;
+static uintptr_t g_off_bullet_base_transmit = 0;
+static uintptr_t g_off_move_control_entity = 0;
+static uintptr_t g_off_move_control_moving = 0;
+static uintptr_t g_off_move_control_move_direction = 0;
+static uintptr_t g_off_adcallback_b_callback = 0;
+static uintptr_t g_off_adcallback_b_opened = 0;
+static uintptr_t g_off_base_driver_callback = 0;
+static uintptr_t g_off_wrapped_adapter_callbacks = 0;
+static uintptr_t g_off_obscured_vector3_key = 0;
+static uintptr_t g_off_obscured_vector3_hidden = 0;
+static uintptr_t g_off_obscured_vector3_inited = 0;
+static uintptr_t g_off_obscured_vector3_fake = 0;
+static uintptr_t g_off_obscured_vector3_fake_active = 0;
 
 static constexpr int kEntityTypeHero = 1;
 static constexpr int32_t kSkillWalkThroughWater = 2080;
 static constexpr int32_t kSkillGreed = 1000040;
 static constexpr int32_t kSkillSmart = 1000041;
-static constexpr uintptr_t kDropManagerTotalCounterStartOffset = 0x30;
-static constexpr uintptr_t kDropManagerTotalCounterEndOffset = 0xB8;
 static constexpr int32_t kAlwaysOnDamageValue = 2000000000;
 static constexpr int32_t kAlwaysOnHealthValue = 2000000000;
 static constexpr float kAlwaysOnAttackSpeedValue = 100.0f;
@@ -363,6 +361,7 @@ static volatile bool g_enable_inject_greed_skill = true;
 static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
 static volatile bool g_enable_move_speed = true;
+static volatile bool g_skip_rewarded_ads = true;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
 static volatile bool g_force_server_validation = true;
@@ -412,7 +411,6 @@ static volatile uint64_t g_resolve_xref_count = 0;
 static volatile uint64_t g_resolve_rva_count = 0;
 static volatile uint64_t g_resolve_fail_count = 0;
 static volatile uint64_t g_field_resolve_metadata_count = 0;
-static volatile uint64_t g_field_resolve_fallback_count = 0;
 static volatile uint64_t g_field_resolve_fail_count = 0;
 static volatile uint64_t g_direct_patch_resolved_count = 0;
 static volatile uint64_t g_direct_patch_write_count = 0;
@@ -475,6 +473,14 @@ static volatile uint64_t g_hit_force_build_cheat_missed = 0;
 static volatile uint64_t g_hit_netcacheone_dump = 0;
 static volatile uint64_t g_hit_netcacheone_replay = 0;
 static volatile uint64_t g_hit_netcacheone_replay_skipped = 0;
+static volatile uint64_t g_hit_ad_skip_isloaded = 0;
+static volatile uint64_t g_hit_ad_skip_show = 0;
+static volatile uint64_t g_hit_ad_skip_high_ecpm = 0;
+static volatile uint64_t g_hit_ad_skip_adapter = 0;
+static volatile uint64_t g_hit_ad_skip_driver = 0;
+static volatile uint64_t g_hit_ad_skip_reward = 0;
+static volatile uint64_t g_hit_ad_skip_close = 0;
+static volatile uint64_t g_hit_ad_skip_passthrough = 0;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
@@ -760,7 +766,7 @@ struct ModuleSegment {
 };
 
 struct HookSpec {
-    uintptr_t fallback_rva;
+    uintptr_t dump_rva;
     const char* namespaze;
     const char* klass;
     const char* method;
@@ -1467,13 +1473,11 @@ static void* resolve_class_by_metadata_name(const char* namespaze, const char* k
 static bool resolve_field_offset_by_metadata(const char* namespaze,
                                              const char* klass,
                                              const char* field_name,
-                                             uintptr_t fallback,
                                              uintptr_t* out) {
     if (!out) return false;
-    *out = fallback;
+    *out = 0;
     if (!resolve_il2cpp_api() || !g_il2cpp_api.class_get_fields ||
         !g_il2cpp_api.field_get_name || !g_il2cpp_api.field_get_offset) {
-        bump(g_field_resolve_fallback_count);
         bump(g_field_resolve_fail_count);
         set_last_field_resolve_state("field_api_missing");
         return false;
@@ -1481,12 +1485,10 @@ static bool resolve_field_offset_by_metadata(const char* namespaze,
 
     void* klass_ptr = resolve_class_by_metadata_name(namespaze, klass);
     if (!klass_ptr) {
-        bump(g_field_resolve_fallback_count);
         bump(g_field_resolve_fail_count);
         char state[256];
-        snprintf(state, sizeof(state), "class_missing %s.%s.%s fallback=0x%lx",
-                 namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
-                 static_cast<unsigned long>(fallback));
+        snprintf(state, sizeof(state), "class_missing %s.%s.%s",
+                 namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "");
         set_last_field_resolve_state(state);
         return false;
     }
@@ -1498,13 +1500,11 @@ static bool resolve_field_offset_by_metadata(const char* namespaze,
         if (!name || !field_name || strcmp(name, field_name) != 0) continue;
         size_t offset = g_il2cpp_api.field_get_offset(field);
         if (offset >= 0x100000) {
-            bump(g_field_resolve_fallback_count);
             bump(g_field_resolve_fail_count);
             char state[256];
-            snprintf(state, sizeof(state), "offset_invalid %s.%s.%s offset=0x%lx fallback=0x%lx",
+            snprintf(state, sizeof(state), "offset_invalid %s.%s.%s offset=0x%lx",
                      namespaze ? namespaze : "", klass ? klass : "", field_name,
-                     static_cast<unsigned long>(offset),
-                     static_cast<unsigned long>(fallback));
+                     static_cast<unsigned long>(offset));
             set_last_field_resolve_state(state);
             return false;
         }
@@ -1513,12 +1513,10 @@ static bool resolve_field_offset_by_metadata(const char* namespaze,
         return true;
     }
 
-    bump(g_field_resolve_fallback_count);
     bump(g_field_resolve_fail_count);
     char state[256];
-    snprintf(state, sizeof(state), "field_missing %s.%s.%s fallback=0x%lx",
-             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
-             static_cast<unsigned long>(fallback));
+    snprintf(state, sizeof(state), "field_missing %s.%s.%s",
+             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "");
     set_last_field_resolve_state(state);
     return false;
 }
@@ -1526,22 +1524,19 @@ static bool resolve_field_offset_by_metadata(const char* namespaze,
 static bool resolve_value_type_field_offset_by_metadata(const char* namespaze,
                                                         const char* klass,
                                                         const char* field_name,
-                                                        uintptr_t fallback,
                                                         uintptr_t* out) {
-    bool ok = resolve_field_offset_by_metadata(namespaze, klass, field_name, fallback, out);
+    bool ok = resolve_field_offset_by_metadata(namespaze, klass, field_name, out);
     if (!ok || !out) return ok;
     if (*out >= kIl2CppObjectHeaderSize) {
         *out -= kIl2CppObjectHeaderSize;
         return true;
     }
 
-    *out = fallback;
-    bump(g_field_resolve_fallback_count);
+    *out = 0;
     bump(g_field_resolve_fail_count);
     char state[256];
-    snprintf(state, sizeof(state), "value_type_offset_invalid %s.%s.%s fallback=0x%lx",
-             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
-             static_cast<unsigned long>(fallback));
+    snprintf(state, sizeof(state), "value_type_offset_invalid %s.%s.%s",
+             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "");
     set_last_field_resolve_state(state);
     return false;
 }
@@ -1550,56 +1545,65 @@ static void resolve_runtime_field_offsets() {
     g_field_offsets_ready = false;
     int requested = 0;
     int resolved = 0;
-#define RESOLVE_FIELD_OFFSET(storage, ns, klass, field, fallback) \
+#define RESOLVE_FIELD_OFFSET(storage, ns, klass, field) \
     do { \
         ++requested; \
-        if (resolve_field_offset_by_metadata((ns), (klass), (field), (fallback), &(storage))) { \
+        if (resolve_field_offset_by_metadata((ns), (klass), (field), &(storage))) { \
             ++resolved; \
         } \
     } while (0)
-#define RESOLVE_VALUE_FIELD_OFFSET(storage, ns, klass, field, fallback) \
+#define RESOLVE_VALUE_FIELD_OFFSET(storage, ns, klass, field) \
     do { \
         ++requested; \
-        if (resolve_value_type_field_offset_by_metadata((ns), (klass), (field), (fallback), &(storage))) { \
+        if (resolve_value_type_field_offset_by_metadata((ns), (klass), (field), &(storage))) { \
             ++resolved; \
         } \
     } while (0)
 
-    RESOLVE_FIELD_OFFSET(g_off_entity_data_entity, "", "EntityData", "m_Entity", kEntityDataEntityOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_stone_count, "", "EntityData", "mFlyStoneCount", kEntityDataFlyStoneCountOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_water_count, "", "EntityData", "mFlyWaterCount", kEntityDataFlyWaterCountOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_data, "", "EntityBase", "m_EntityData", kEntityBaseDataOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_type, "", "EntityBase", "m_Type", kEntityBaseTypeOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_water, "", "EntityBase", "bFlyWater", kEntityBaseFlyWaterOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_stone, "", "EntityBase", "bFlyStone", kEntityBaseFlyStoneOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_hit_ctrl, "", "EntityBase", "mHitCtrl", kEntityBaseHitCtrlOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_base_move_layer_mask, "", "EntityBase", "move_layermask", kEntityBaseMoveLayerMaskOffset);
-    RESOLVE_FIELD_OFFSET(g_off_entity_hit_ctrl_entity, "", "EntityHitCtrl", "m_Entity", kEntityHitCtrlEntityOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_entity, "", "BulletTransmit", "m_Entity", kBulletTransmitEntityOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_weapon_data, "", "BulletTransmit", "weapondata", kBulletTransmitWeaponDataOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_through_wall, "", "BulletTransmit", "<ThroughWall>k__BackingField", kBulletTransmitThroughWallOffset);
-    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_wall, "TableTool", "Weapon_weapon", "bThroughWallp", kWeaponWeaponThroughWallOffset);
-    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_inside_wall, "TableTool", "Weapon_weapon", "bThroughInsideWallp", kWeaponWeaponThroughInsideWallOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_base_entity, "", "BulletBase", "<m_Entity>k__BackingField", kBulletBaseEntityOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_base_weapon_data, "", "BulletBase", "m_Data", kBulletBaseWeaponDataOffset);
-    RESOLVE_FIELD_OFFSET(g_off_bullet_base_transmit, "", "BulletBase", "mBulletTransmit", kBulletBaseTransmitOffset);
-    RESOLVE_FIELD_OFFSET(g_off_move_control_entity, "", "MoveControl", "m_Entity", kMoveControlEntityOffset);
-    RESOLVE_FIELD_OFFSET(g_off_move_control_move_direction, "", "MoveControl", "MoveDirection", kMoveControlMoveDirectionOffset);
-    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_key, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "currentCryptoKey", kObscuredVector3KeyOffset);
-    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_hidden, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "hiddenValue", kObscuredVector3HiddenOffset);
-    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited", kObscuredVector3InitedOffset);
-    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue", kObscuredVector3FakeOffset);
-    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive", kObscuredVector3FakeActiveOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_entity, "", "EntityData", "m_Entity");
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_stone_count, "", "EntityData", "mFlyStoneCount");
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_water_count, "", "EntityData", "mFlyWaterCount");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_data, "", "EntityBase", "m_EntityData");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_type, "", "EntityBase", "m_Type");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_water, "", "EntityBase", "bFlyWater");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_stone, "", "EntityBase", "bFlyStone");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_hit_ctrl, "", "EntityBase", "mHitCtrl");
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_move_layer_mask, "", "EntityBase", "move_layermask");
+    RESOLVE_FIELD_OFFSET(g_off_entity_hit_ctrl_entity, "", "EntityHitCtrl", "m_Entity");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_entity, "", "BulletTransmit", "m_Entity");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_weapon_data, "", "BulletTransmit", "weapondata");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_through_wall, "", "BulletTransmit", "<ThroughWall>k__BackingField");
+    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_wall, "TableTool", "Weapon_weapon", "bThroughWallp");
+    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_inside_wall, "TableTool", "Weapon_weapon", "bThroughInsideWallp");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_entity, "", "BulletBase", "<m_Entity>k__BackingField");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_weapon_data, "", "BulletBase", "m_Data");
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_transmit, "", "BulletBase", "mBulletTransmit");
+    RESOLVE_FIELD_OFFSET(g_off_move_control_entity, "", "MoveControl", "m_Entity");
+    RESOLVE_FIELD_OFFSET(g_off_move_control_moving, "", "MoveControl", "bMoveing");
+    RESOLVE_FIELD_OFFSET(g_off_move_control_move_direction, "", "MoveControl", "MoveDirection");
+    RESOLVE_FIELD_OFFSET(g_off_adcallback_b_callback, "", "AdCallbackControl", "bCallback");
+    RESOLVE_FIELD_OFFSET(g_off_adcallback_b_opened, "", "AdCallbackControl", "bOpened");
+    RESOLVE_FIELD_OFFSET(g_off_base_driver_callback, "", "AdsRequestHelper.BaseDriver", "callback");
+    RESOLVE_FIELD_OFFSET(g_off_wrapped_adapter_callbacks, "", "AdsRequestHelper.WrappedAdapter", "callbacks");
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_key, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "currentCryptoKey");
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_hidden, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "hiddenValue");
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited");
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue");
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive");
 
 #undef RESOLVE_VALUE_FIELD_OFFSET
 #undef RESOLVE_FIELD_OFFSET
 
     g_field_offsets_ready = (resolved == requested);
     char state[256];
-    snprintf(state, sizeof(state), "resolved=%d/%d ready=%d bullet_through=0x%lx move_dir=0x%lx entity_type=0x%lx",
+    snprintf(state, sizeof(state), "resolved=%d/%d ready=%d bullet_through=0x%lx move_moving=0x%lx move_dir=0x%lx ad_cb=0x%lx base_cb=0x%lx adapter_cb=0x%lx entity_type=0x%lx",
              resolved, requested, g_field_offsets_ready ? 1 : 0,
              static_cast<unsigned long>(g_off_bullet_transmit_through_wall),
+             static_cast<unsigned long>(g_off_move_control_moving),
              static_cast<unsigned long>(g_off_move_control_move_direction),
+             static_cast<unsigned long>(g_off_adcallback_b_callback),
+             static_cast<unsigned long>(g_off_base_driver_callback),
+             static_cast<unsigned long>(g_off_wrapped_adapter_callbacks),
              static_cast<unsigned long>(g_off_entity_base_type));
     set_last_field_resolve_state(state);
 }
@@ -1840,23 +1844,44 @@ static const HookSpec kHookSpecs[] = {
     {rva::EntityBase_SetCollider, "", "EntityBase", "SetCollider", 1, nullptr, nullptr, nullptr},
     {rva::EntityBase_SetFlyAll, "", "EntityBase", "SetFlyAll", 1, nullptr, nullptr, nullptr},
     {rva::EntityBase_CheckPos, "", "EntityBase", "check_pos", 1, "UnityEngine.Vector3", nullptr, nullptr},
+    {rva::EntityBase_SelfMoveBy, "", "EntityBase", "SelfMoveBy", 1, "UnityEngine.Vector3", nullptr, nullptr},
     {rva::EntityBase_AddSkill, "", "EntityBase", "AddSkill", 1, "System.Int32", nullptr, nullptr},
     {rva::EntityBase_ContainsSkill, "", "EntityBase", "ContainsSkill", 1, "System.Int32", nullptr, nullptr},
     {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr, nullptr, nullptr},
     {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr, nullptr, nullptr},
     {rva::MoveControl_UpdateProgress, "", "MoveControl", "UpdateProgress", 0, nullptr, nullptr, nullptr},
+    {rva::AdCallbackControl_IsLoaded, "", "AdCallbackControl", "IsLoaded", 1, nullptr, nullptr, nullptr},
+    {rva::AdCallbackControl_Show, "", "AdCallbackControl", "Show", 1, nullptr, nullptr, nullptr},
+    {rva::AdCallbackControl_onClose, "", "AdCallbackControl", "onClose", 2, nullptr, nullptr, nullptr},
+    {rva::AdCallbackControl_onReward, "", "AdCallbackControl", "onReward", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_ALMaxRewardedDriver_isLoaded, "", "AdsRequestHelper.ALMaxRewardedDriver", "isLoaded", 0, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_ALMaxRewardedDriver_Show, "", "AdsRequestHelper.ALMaxRewardedDriver", "Show", 0, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedDriver_onClose, "", "AdsRequestHelper.WrappedDriver", "onClose", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedDriver_onReward, "", "AdsRequestHelper.WrappedDriver", "onReward", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_CombinedDriver_onClose, "", "AdsRequestHelper.CombinedDriver", "onClose", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_CombinedDriver_onReward, "", "AdsRequestHelper.CombinedDriver", "onReward", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_CallbackRouter_onClose, "", "AdsRequestHelper.CallbackRouter", "onClose", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_CallbackRouter_onReward, "", "AdsRequestHelper.CallbackRouter", "onReward", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_isLoaded, "", "AdsRequestHelper.WrappedAdapter", "isLoaded", 0, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show, "", "AdsRequestHelper.WrappedAdapter", "Show", 0, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback, "", "AdsRequestHelper.WrappedAdapter", "Show", 1, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, "", "AdsRequestHelper.WrappedAdapter", "Show", 2, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, "", "AdsRequestHelper", "rewarded_high_eCPM_isLoaded", 0, nullptr, nullptr, nullptr},
+    {rva::AdsRequestHelper_rewarded_high_eCPM_show, "", "AdsRequestHelper", "rewarded_high_eCPM_show", 2, nullptr, nullptr, nullptr},
+    {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr, nullptr, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr, "FE 4F BF A9 ?? ?? ?? ?? 60 2E 46 F9 A0 00 00 B5 ?? ?? ?? ?? 00 B4 06 91 ?? ?? ?? ?? 60 2E 06 F9 FE 4F C1 A8 00 00 1F D6", "UnityEngine.Time::get_timeScale()"},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr, "E8 0F 1E FC FE 4F 01 A9 ?? ?? ?? ?? 60 32 46 F9 08 1C A0 4E A0 00 00 B5 ?? ?? ?? ?? 00 F0 0F 91 ?? ?? ?? ?? 60 32 06 F9", "UnityEngine.Time::set_timeScale(System.Single)"},
 };
 
 static const HookSpec* find_hook_spec(uintptr_t rva_value) {
     for (size_t i = 0; i < sizeof(kHookSpecs) / sizeof(kHookSpecs[0]); ++i) {
-        if (kHookSpecs[i].fallback_rva == rva_value) return &kHookSpecs[i];
+        if (kHookSpecs[i].dump_rva == rva_value) return &kHookSpecs[i];
     }
     return nullptr;
 }
 
 static uintptr_t resolve_hook_target(uintptr_t base, uintptr_t rva_value, const char* log_name, const char** strategy) {
+    (void)base;
     const HookSpec* spec = find_hook_spec(rva_value);
     if (spec) {
         uintptr_t target = resolve_by_metadata(*spec);
@@ -1865,26 +1890,9 @@ static uintptr_t resolve_hook_target(uintptr_t base, uintptr_t rva_value, const 
             bump(g_resolve_metadata_count);
             return target;
         }
-        target = resolve_by_aob(*spec);
-        if (target) {
-            *strategy = "aob";
-            bump(g_resolve_aob_count);
-            return target;
-        }
-        target = resolve_by_string_xref(*spec);
-        if (target) {
-            *strategy = "xref";
-            bump(g_resolve_xref_count);
-            return target;
-        }
-    }
-    if (base && rva_value) {
-        *strategy = "rva";
-        bump(g_resolve_rva_count);
-        return base + rva_value;
     }
     bump(g_resolve_fail_count);
-    set_last_resolve_error(log_name, "unresolved");
+    set_last_resolve_error(log_name, spec ? "metadata_unresolved" : "missing_spec");
     *strategy = "fail";
     return 0;
 }
@@ -1909,18 +1917,11 @@ static bool wait_for_il2cpp_metadata_ready() {
 }
 
 static bool total_counter_relax_enabled() {
-    return g_max_drop_cap_patch;
+    return false;
 }
 
 static void relax_drop_manager_total_counters(void* thiz) {
-    if (!total_counter_relax_enabled() || !thiz) return;
-    uintptr_t base = reinterpret_cast<uintptr_t>(thiz);
-    for (uintptr_t off = kDropManagerTotalCounterStartOffset;
-         off <= kDropManagerTotalCounterEndOffset;
-         off += sizeof(int32_t)) {
-        *reinterpret_cast<volatile int32_t*>(base + off) = 0;
-    }
-    bump(g_hit_total_counter_relax);
+    (void)thiz;
 }
 
 static void set_last_config_path(const char* path) {
@@ -2009,6 +2010,7 @@ static bool write_default_config_file(const char* path) {
         "game_speed_multiplier=4\n"
         "move_speed=1\n"
         "move_speed_multiplier=1\n"
+        "skip_rewarded_ads=1\n"
         "install_gold_hooks=0\n"
         "force_server_validation=1\n"
         "dump_netcacheone=1\n"
@@ -2145,6 +2147,7 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "inject_smart_skill") == 0) g_enable_inject_smart_skill = parse_bool_value(value);
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
     else if (strcmp(key, "move_speed") == 0) g_enable_move_speed = parse_bool_value(value);
+    else if (strcmp(key, "skip_rewarded_ads") == 0) g_skip_rewarded_ads = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "force_server_validation") == 0) g_force_server_validation = parse_bool_value(value);
     else if (strcmp(key, "dump_netcacheone") == 0) g_dump_netcacheone = parse_bool_value(value);
@@ -2283,6 +2286,7 @@ static void write_status_file_once() {
     fprintf(f, "game_speed_multiplier=%f\n", static_cast<double>(g_game_speed_multiplier));
     fprintf(f, "move_speed=%d\n", g_enable_move_speed ? 1 : 0);
     fprintf(f, "move_speed_multiplier=%f\n", static_cast<double>(g_move_speed_multiplier));
+    fprintf(f, "skip_rewarded_ads=%d\n", g_skip_rewarded_ads ? 1 : 0);
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
     fprintf(f, "force_server_validation=%d\n", g_force_server_validation ? 1 : 0);
@@ -2308,13 +2312,18 @@ static void write_status_file_once() {
     fprintf(f, "resolver.last_error=%s\n", g_last_resolve_error);
     fprintf(f, "resolver.metadata_state=%s\n", g_last_metadata_state);
     fprintf(f, "field_resolver.metadata=%llu\n", static_cast<unsigned long long>(g_field_resolve_metadata_count));
-    fprintf(f, "field_resolver.fallback=%llu\n", static_cast<unsigned long long>(g_field_resolve_fallback_count));
+    fprintf(f, "field_resolver.fallback=0\n");
     fprintf(f, "field_resolver.fail=%llu\n", static_cast<unsigned long long>(g_field_resolve_fail_count));
     fprintf(f, "field_resolver.state=%s\n", g_last_field_resolve_state);
     fprintf(f, "field_offsets_ready=%d\n", g_field_offsets_ready ? 1 : 0);
     fprintf(f, "field_offsets.entity_type=0x%lx\n", static_cast<unsigned long>(g_off_entity_base_type));
     fprintf(f, "field_offsets.bullet_through_wall=0x%lx\n", static_cast<unsigned long>(g_off_bullet_transmit_through_wall));
+    fprintf(f, "field_offsets.move_moving=0x%lx\n", static_cast<unsigned long>(g_off_move_control_moving));
     fprintf(f, "field_offsets.move_direction=0x%lx\n", static_cast<unsigned long>(g_off_move_control_move_direction));
+    fprintf(f, "field_offsets.adcallback_b_callback=0x%lx\n", static_cast<unsigned long>(g_off_adcallback_b_callback));
+    fprintf(f, "field_offsets.adcallback_b_opened=0x%lx\n", static_cast<unsigned long>(g_off_adcallback_b_opened));
+    fprintf(f, "field_offsets.base_driver_callback=0x%lx\n", static_cast<unsigned long>(g_off_base_driver_callback));
+    fprintf(f, "field_offsets.wrapped_adapter_callbacks=0x%lx\n", static_cast<unsigned long>(g_off_wrapped_adapter_callbacks));
     fprintf(f, "field_offsets.obscured_vector3=key:0x%lx hidden:0x%lx inited:0x%lx fake:0x%lx active:0x%lx\n",
             static_cast<unsigned long>(g_off_obscured_vector3_key),
             static_cast<unsigned long>(g_off_obscured_vector3_hidden),
@@ -2334,9 +2343,7 @@ static void write_status_file_once() {
     fprintf(f, "max_drop_cap_value=%d\n", clamp_max_drop_cap(g_max_drop_cap_value));
     fprintf(f, "max_gold_cap_value=%d\n", clamp_max_gold_cap(g_max_gold_cap_value));
     fprintf(f, "chapter_drop_total_counter_bypass=%d\n", total_counter_relax_enabled() ? 1 : 0);
-    fprintf(f, "drop_manager_total_counter_offsets=0x%lx-0x%lx\n",
-            static_cast<unsigned long>(kDropManagerTotalCounterStartOffset),
-            static_cast<unsigned long>(kDropManagerTotalCounterEndOffset));
+    fprintf(f, "drop_manager_total_counter_offsets=disabled_metadata_only\n");
     fprintf(f, "stagelevel_direct_cap_count=%zu\n",
             sizeof(g_patch_stagelevel_max_caps) / sizeof(g_patch_stagelevel_max_caps[0]));
     fprintf(f, "istage_direct_gold_cap=skipped_full_int32_requires_concrete_hook\n");
@@ -2407,6 +2414,14 @@ static void write_status_file_once() {
     fprintf(f, "hits.netcacheone_dump=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_dump));
     fprintf(f, "hits.netcacheone_replay=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay));
     fprintf(f, "hits.netcacheone_replay_skipped=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay_skipped));
+    fprintf(f, "hits.ad_skip_isloaded=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_isloaded));
+    fprintf(f, "hits.ad_skip_show=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_show));
+    fprintf(f, "hits.ad_skip_high_ecpm=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_high_ecpm));
+    fprintf(f, "hits.ad_skip_adapter=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_adapter));
+    fprintf(f, "hits.ad_skip_driver=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_driver));
+    fprintf(f, "hits.ad_skip_reward=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_reward));
+    fprintf(f, "hits.ad_skip_close=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_close));
+    fprintf(f, "hits.ad_skip_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_passthrough));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2599,10 +2614,21 @@ using EntityVoidFn = void (*)(void* thiz, void* method);
 using EntityAddSkillFn = void (*)(void* thiz, int32_t skill_id, void* method);
 using EntityContainsSkillFn = bool (*)(void* thiz, int32_t skill_id, void* method);
 using EntityVector3Fn = Vector3Lite (*)(void* thiz, Vector3Lite value, void* method);
+using EntitySelfMoveByFn = void (*)(void* thiz, Vector3Lite pos, void* method);
 using EntitySetFlyOneFn = void (*)(void* thiz, void* layer, bool value, void* method);
 using MoveControlVoidFn = void (*)(void* thiz, void* method);
+using TimeDeltaGetterFn = float (*)(void* method);
 using TimeScaleGetterFn = float (*)(void* method);
 using TimeScaleSetterFn = void (*)(float value, void* method);
+using AdCallbackIsLoadedFn = bool (*)(void* thiz, int32_t adapter_id, void* method);
+using AdCallbackShowFn = void (*)(void* thiz, int32_t adapter_id, void* method);
+using AdCallbackEventFn = void (*)(void* thiz, void* sender, void* network_name, void* method);
+using DriverBoolFn = bool (*)(void* thiz, void* method);
+using AdapterShowNoArgFn = bool (*)(void* thiz, void* method);
+using AdapterShowCallbackFn = bool (*)(void* thiz, void* callback, void* method);
+using AdapterShowCallbackSourceFn = bool (*)(void* thiz, void* callback, int32_t source, void* method);
+using RewardedHighEcpmIsLoadedFn = bool (*)(void* method);
+using RewardedHighEcpmShowFn = void (*)(void* callback, int32_t source, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
 static GetMissFn g_orig_get_miss = nullptr;
 static UpgradeBaseIntFn g_orig_get_atk_base = nullptr;
@@ -2626,15 +2652,40 @@ static EntityVector3Fn g_orig_entitybase_check_pos = nullptr;
 static EntityVoidFn g_orig_entitybase_add_init_skills = nullptr;
 static EntityAddSkillFn g_entitybase_add_skill = nullptr;
 static EntityContainsSkillFn g_entitybase_contains_skill = nullptr;
+static EntitySelfMoveByFn g_entitybase_self_move_by = nullptr;
 static EntitySetFlyOneFn g_orig_entityhitctrl_set_fly_one = nullptr;
 static MoveControlVoidFn g_orig_movecontrol_update_progress = nullptr;
+static TimeDeltaGetterFn g_time_get_delta_time = nullptr;
 static TimeScaleGetterFn g_orig_time_get_scale = nullptr;
 static TimeScaleSetterFn g_orig_time_set_scale = nullptr;
+static AdCallbackIsLoadedFn g_orig_adcallback_is_loaded = nullptr;
+static AdCallbackShowFn g_orig_adcallback_show = nullptr;
+static AdCallbackEventFn g_adcallback_on_reward = nullptr;
+static AdCallbackEventFn g_adcallback_on_close = nullptr;
+static AdCallbackEventFn g_wrappeddriver_on_reward = nullptr;
+static AdCallbackEventFn g_wrappeddriver_on_close = nullptr;
+static AdCallbackEventFn g_combineddriver_on_reward = nullptr;
+static AdCallbackEventFn g_combineddriver_on_close = nullptr;
+static AdCallbackEventFn g_callbackrouter_on_reward = nullptr;
+static AdCallbackEventFn g_callbackrouter_on_close = nullptr;
+static DriverBoolFn g_orig_almax_rewarded_is_loaded = nullptr;
+static DriverBoolFn g_orig_almax_rewarded_show = nullptr;
+static DriverBoolFn g_orig_wrapped_adapter_is_loaded = nullptr;
+static AdapterShowNoArgFn g_orig_wrapped_adapter_show = nullptr;
+static AdapterShowCallbackFn g_orig_wrapped_adapter_show_callback = nullptr;
+static AdapterShowCallbackSourceFn g_orig_wrapped_adapter_show_callback_source = nullptr;
+static RewardedHighEcpmIsLoadedFn g_orig_rewarded_high_ecpm_is_loaded = nullptr;
+static RewardedHighEcpmShowFn g_orig_rewarded_high_ecpm_show = nullptr;
+static void* g_adcallback_control_class = nullptr;
+static void* g_wrappeddriver_class = nullptr;
+static void* g_combineddriver_class = nullptr;
+static void* g_callbackrouter_class = nullptr;
 static uintptr_t g_last_traversal_entity = 0;
 static uintptr_t g_last_water_skill_inject_entity = 0;
 static uintptr_t g_last_greed_skill_inject_entity = 0;
 static uintptr_t g_last_smart_skill_inject_entity = 0;
 static __thread bool g_applying_traversal_runtime = false;
+static __thread bool g_completing_rewarded_ad = false;
 
 static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
     if (!g_field_offsets_ready || !entity_base || !is_hero_entity_base(entity_base)) return false;
@@ -3088,6 +3139,65 @@ static bool write_move_progress_direction_scaled(void* move_control,
     return true;
 }
 
+static bool move_control_is_moving(void* move_control) {
+    if (!g_field_offsets_ready || !move_control) return false;
+    return *reinterpret_cast<volatile uint8_t*>(
+        reinterpret_cast<uintptr_t>(move_control) + g_off_move_control_moving
+    ) != 0;
+}
+
+static bool apply_extra_self_move(void* move_control, void* entity_base, float extra_multiplier) {
+    if (!move_control || !entity_base || !g_entitybase_self_move_by || !g_time_get_delta_time) {
+        return false;
+    }
+    if (extra_multiplier <= kMoveProgressFractionEpsilon || !isfinite(extra_multiplier)) return false;
+    if (!move_control_is_moving(move_control)) return false;
+
+    ObscuredVector3Snapshot snapshot{};
+    Vector3Lite direction{};
+    float magnitude = 0.0f;
+    if (!read_move_progress_direction(move_control, &snapshot, &direction, &magnitude)) return false;
+
+    float delta_time = g_time_get_delta_time(nullptr);
+    if (!isfinite(delta_time) || delta_time <= 0.0f || delta_time > 1.0f) return false;
+
+    g_last_move_progress_scaled = magnitude * (extra_multiplier + 1.0f);
+    int32_t whole_steps = static_cast<int32_t>(floorf(extra_multiplier));
+    if (whole_steps < 0) whole_steps = 0;
+    if (whole_steps > kMoveProgressMaxSubsteps) whole_steps = kMoveProgressMaxSubsteps;
+    float fractional_step = extra_multiplier - static_cast<float>(whole_steps);
+    if (fractional_step < kMoveProgressFractionEpsilon) fractional_step = 0.0f;
+
+    int32_t applied_steps = 0;
+    for (int32_t i = 0; i < whole_steps; ++i) {
+        Vector3Lite delta = {
+            static_cast<float>(static_cast<double>(direction.x) * static_cast<double>(delta_time)),
+            static_cast<float>(static_cast<double>(direction.y) * static_cast<double>(delta_time)),
+            static_cast<float>(static_cast<double>(direction.z) * static_cast<double>(delta_time)),
+        };
+        if (!isfinite(delta.x) || !isfinite(delta.y) || !isfinite(delta.z)) break;
+        g_entitybase_self_move_by(entity_base, delta, nullptr);
+        ++applied_steps;
+    }
+    if (fractional_step > 0.0f) {
+        Vector3Lite delta = {
+            static_cast<float>(static_cast<double>(direction.x) * static_cast<double>(delta_time) * static_cast<double>(fractional_step)),
+            static_cast<float>(static_cast<double>(direction.y) * static_cast<double>(delta_time) * static_cast<double>(fractional_step)),
+            static_cast<float>(static_cast<double>(direction.z) * static_cast<double>(delta_time) * static_cast<double>(fractional_step)),
+        };
+        if (isfinite(delta.x) && isfinite(delta.y) && isfinite(delta.z)) {
+            g_entitybase_self_move_by(entity_base, delta, nullptr);
+            ++applied_steps;
+        }
+    }
+
+    g_last_move_progress_steps = 1 + applied_steps;
+    if (applied_steps > 0) {
+        bump(g_hit_move_progress_substeps, static_cast<uint64_t>(applied_steps));
+    }
+    return applied_steps > 0;
+}
+
 static void hk_movecontrol_update_progress(void* thiz, void* method) {
     bump(g_hit_move_progress_get);
     if (!g_orig_movecontrol_update_progress) return;
@@ -3103,6 +3213,19 @@ static void hk_movecontrol_update_progress(void* thiz, void* method) {
         return;
     }
 
+    if (multiplier > 1.0f) {
+        g_orig_movecontrol_update_progress(thiz, method);
+        void* refreshed_entity_base = get_entity_base_from_move_control(thiz);
+        if (!is_hero_entity_base(refreshed_entity_base)) return;
+        if (apply_extra_self_move(thiz, refreshed_entity_base, multiplier - 1.0f)) {
+            bump(g_hit_move_progress_apply);
+        } else {
+            bump(g_hit_move_progress_passthrough);
+            g_last_move_progress_steps = 1;
+        }
+        return;
+    }
+
     ObscuredVector3Snapshot snapshot{};
     Vector3Lite direction{};
     float magnitude = 0.0f;
@@ -3115,29 +3238,10 @@ static void hk_movecontrol_update_progress(void* thiz, void* method) {
 
     g_last_move_progress_scaled = magnitude * multiplier;
     bump(g_hit_move_progress_apply);
-    int32_t whole_steps = static_cast<int32_t>(floorf(multiplier));
-    if (whole_steps < 0) whole_steps = 0;
-    if (whole_steps > kMoveProgressMaxSubsteps) whole_steps = kMoveProgressMaxSubsteps;
-    float fractional_step = multiplier - static_cast<float>(whole_steps);
-    if (fractional_step < kMoveProgressFractionEpsilon) fractional_step = 0.0f;
-
     int32_t applied_steps = 0;
-    if (whole_steps <= 0) {
-        if (write_move_progress_direction_scaled(thiz, direction, multiplier)) {
-            g_orig_movecontrol_update_progress(thiz, method);
-            applied_steps = 1;
-        }
-    } else {
-        for (int32_t i = 0; i < whole_steps; ++i) {
-            if (!write_move_progress_direction_scaled(thiz, direction, 1.0f)) break;
-            g_orig_movecontrol_update_progress(thiz, method);
-            ++applied_steps;
-        }
-        if (fractional_step > 0.0f &&
-            write_move_progress_direction_scaled(thiz, direction, fractional_step)) {
-            g_orig_movecontrol_update_progress(thiz, method);
-            ++applied_steps;
-        }
+    if (write_move_progress_direction_scaled(thiz, direction, multiplier)) {
+        g_orig_movecontrol_update_progress(thiz, method);
+        applied_steps = 1;
     }
     g_last_move_progress_steps = applied_steps;
     if (applied_steps > 0) {
@@ -3171,6 +3275,182 @@ static void hk_time_set_scale(float value, void* method) {
     if (!g_orig_time_set_scale) return;
     bump(g_hit_game_speed_apply);
     g_orig_time_set_scale(clamp_game_speed(g_game_speed_multiplier), method);
+}
+
+static bool is_adcallback_control_instance(void* callback) {
+    if (!callback || !g_adcallback_control_class) return false;
+    return *reinterpret_cast<void**>(callback) == g_adcallback_control_class;
+}
+
+static bool is_instance_of_class(void* obj, void* klass) {
+    if (!obj || !klass) return false;
+    return *reinterpret_cast<void**>(obj) == klass;
+}
+
+static bool can_complete_rewarded_ad() {
+    return (g_adcallback_on_reward && g_adcallback_on_close) ||
+           (g_wrappeddriver_on_reward && g_wrappeddriver_on_close) ||
+           (g_combineddriver_on_reward && g_combineddriver_on_close) ||
+           (g_callbackrouter_on_reward && g_callbackrouter_on_close);
+}
+
+static void complete_rewarded_ad(void* ad_callback_control) {
+    if (!ad_callback_control) return;
+    if (!g_field_offsets_ready) return;
+    if (g_completing_rewarded_ad) return;
+    g_completing_rewarded_ad = true;
+    uintptr_t base = reinterpret_cast<uintptr_t>(ad_callback_control);
+    *reinterpret_cast<volatile uint8_t*>(base + g_off_adcallback_b_callback) = 0;
+    *reinterpret_cast<volatile uint8_t*>(base + g_off_adcallback_b_opened) = 1;
+
+    if (g_adcallback_on_reward) {
+        g_adcallback_on_reward(ad_callback_control, nullptr, nullptr, nullptr);
+        bump(g_hit_ad_skip_reward);
+    }
+
+    *reinterpret_cast<volatile uint8_t*>(base + g_off_adcallback_b_opened) = 1;
+    if (g_adcallback_on_close) {
+        g_adcallback_on_close(ad_callback_control, nullptr, nullptr, nullptr);
+        bump(g_hit_ad_skip_close);
+    }
+    g_completing_rewarded_ad = false;
+}
+
+static bool complete_ads_callback(void* callback, void* sender) {
+    if (!callback || !can_complete_rewarded_ad()) return false;
+    if (is_adcallback_control_instance(callback)) {
+        complete_rewarded_ad(callback);
+        return true;
+    }
+
+    AdCallbackEventFn on_reward = nullptr;
+    AdCallbackEventFn on_close = nullptr;
+    if (is_instance_of_class(callback, g_wrappeddriver_class)) {
+        on_reward = g_wrappeddriver_on_reward;
+        on_close = g_wrappeddriver_on_close;
+    } else if (is_instance_of_class(callback, g_combineddriver_class)) {
+        on_reward = g_combineddriver_on_reward;
+        on_close = g_combineddriver_on_close;
+    } else if (is_instance_of_class(callback, g_callbackrouter_class)) {
+        on_reward = g_callbackrouter_on_reward;
+        on_close = g_callbackrouter_on_close;
+    }
+    if (!on_reward || !on_close) return false;
+
+    on_reward(callback, sender, nullptr, nullptr);
+    bump(g_hit_ad_skip_reward);
+    on_close(callback, sender, nullptr, nullptr);
+    bump(g_hit_ad_skip_close);
+    return true;
+}
+
+static void* read_pointer_field(void* obj, uintptr_t offset) {
+    if (!obj || !g_field_offsets_ready || offset == 0) return nullptr;
+    return *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(obj) + offset);
+}
+
+static bool hk_adcallback_is_loaded(void* thiz, int32_t adapter_id, void* method) {
+    if (g_skip_rewarded_ads && can_complete_rewarded_ad()) {
+        (void)thiz;
+        (void)adapter_id;
+        (void)method;
+        bump(g_hit_ad_skip_isloaded);
+        return true;
+    }
+    return g_orig_adcallback_is_loaded ? g_orig_adcallback_is_loaded(thiz, adapter_id, method) : false;
+}
+
+static void hk_adcallback_show(void* thiz, int32_t adapter_id, void* method) {
+    if (g_skip_rewarded_ads && thiz && can_complete_rewarded_ad()) {
+        (void)adapter_id;
+        (void)method;
+        bump(g_hit_ad_skip_show);
+        complete_rewarded_ad(thiz);
+        return;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    if (g_orig_adcallback_show) g_orig_adcallback_show(thiz, adapter_id, method);
+}
+
+static bool hk_rewarded_high_ecpm_is_loaded(void* method) {
+    if (g_skip_rewarded_ads && can_complete_rewarded_ad()) {
+        (void)method;
+        bump(g_hit_ad_skip_isloaded);
+        return true;
+    }
+    return g_orig_rewarded_high_ecpm_is_loaded ? g_orig_rewarded_high_ecpm_is_loaded(method) : false;
+}
+
+static void hk_rewarded_high_ecpm_show(void* callback, int32_t source, void* method) {
+    if (g_skip_rewarded_ads && complete_ads_callback(callback, nullptr)) {
+        (void)source;
+        (void)method;
+        bump(g_hit_ad_skip_high_ecpm);
+        return;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    if (g_orig_rewarded_high_ecpm_show) g_orig_rewarded_high_ecpm_show(callback, source, method);
+}
+
+static bool hk_almax_rewarded_is_loaded(void* thiz, void* method) {
+    if (g_skip_rewarded_ads && can_complete_rewarded_ad()) {
+        (void)thiz;
+        (void)method;
+        bump(g_hit_ad_skip_isloaded);
+        return true;
+    }
+    return g_orig_almax_rewarded_is_loaded ? g_orig_almax_rewarded_is_loaded(thiz, method) : false;
+}
+
+static bool hk_almax_rewarded_show(void* thiz, void* method) {
+    if (g_skip_rewarded_ads && complete_ads_callback(read_pointer_field(thiz, g_off_base_driver_callback), thiz)) {
+        (void)method;
+        bump(g_hit_ad_skip_driver);
+        return true;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    return g_orig_almax_rewarded_show ? g_orig_almax_rewarded_show(thiz, method) : false;
+}
+
+static bool hk_wrapped_adapter_is_loaded(void* thiz, void* method) {
+    if (g_skip_rewarded_ads && can_complete_rewarded_ad()) {
+        (void)thiz;
+        (void)method;
+        bump(g_hit_ad_skip_isloaded);
+        return true;
+    }
+    return g_orig_wrapped_adapter_is_loaded ? g_orig_wrapped_adapter_is_loaded(thiz, method) : false;
+}
+
+static bool hk_wrapped_adapter_show(void* thiz, void* method) {
+    if (g_skip_rewarded_ads && complete_ads_callback(read_pointer_field(thiz, g_off_wrapped_adapter_callbacks), thiz)) {
+        (void)method;
+        bump(g_hit_ad_skip_adapter);
+        return true;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    return g_orig_wrapped_adapter_show ? g_orig_wrapped_adapter_show(thiz, method) : false;
+}
+
+static bool hk_wrapped_adapter_show_callback(void* thiz, void* callback, void* method) {
+    if (g_skip_rewarded_ads && complete_ads_callback(callback, thiz)) {
+        (void)method;
+        bump(g_hit_ad_skip_adapter);
+        return true;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    return g_orig_wrapped_adapter_show_callback ? g_orig_wrapped_adapter_show_callback(thiz, callback, method) : false;
+}
+
+static bool hk_wrapped_adapter_show_callback_source(void* thiz, void* callback, int32_t source, void* method) {
+    if (g_skip_rewarded_ads && complete_ads_callback(callback, thiz)) {
+        (void)source;
+        (void)method;
+        bump(g_hit_ad_skip_adapter);
+        return true;
+    }
+    bump(g_hit_ad_skip_passthrough);
+    return g_orig_wrapped_adapter_show_callback_source ? g_orig_wrapped_adapter_show_callback_source(thiz, callback, source, method) : false;
 }
 
 static bool is_gold_drop_type(int32_t type) {
@@ -3706,6 +3986,85 @@ static void resolve_traversal_helpers(uintptr_t base) {
     }
 }
 
+static void resolve_movement_helpers(uintptr_t base) {
+    const char* strategy = "unknown";
+    uintptr_t self_move_by = resolve_hook_target(base, rva::EntityBase_SelfMoveBy,
+                                                 "EntityBase_SelfMoveBy", &strategy);
+    if (self_move_by && address_in_libil2cpp_exec(self_move_by)) {
+        g_entitybase_self_move_by = reinterpret_cast<EntitySelfMoveByFn>(self_move_by);
+        LOGD("Resolved EntityBase_SelfMoveBy helper at %p via %s",
+             reinterpret_cast<void*>(self_move_by), strategy);
+    } else {
+        g_entitybase_self_move_by = nullptr;
+        LOGD("Unable to resolve EntityBase_SelfMoveBy helper");
+    }
+
+    strategy = "unknown";
+    uintptr_t delta_time = resolve_hook_target(base, rva::UnityEngine_Time_get_deltaTime,
+                                               "UnityEngine_Time_get_deltaTime", &strategy);
+    if (delta_time && address_in_libil2cpp_exec(delta_time)) {
+        g_time_get_delta_time = reinterpret_cast<TimeDeltaGetterFn>(delta_time);
+        LOGD("Resolved UnityEngine.Time.get_deltaTime helper at %p via %s",
+             reinterpret_cast<void*>(delta_time), strategy);
+    } else {
+        g_time_get_delta_time = nullptr;
+        LOGD("Unable to resolve UnityEngine.Time.get_deltaTime helper");
+    }
+}
+
+static void resolve_ad_helpers(uintptr_t base) {
+    g_adcallback_control_class = resolve_class_by_metadata_name("", "AdCallbackControl");
+    g_wrappeddriver_class = resolve_class_by_metadata_name("", "AdsRequestHelper.WrappedDriver");
+    g_combineddriver_class = resolve_class_by_metadata_name("", "AdsRequestHelper.CombinedDriver");
+    g_callbackrouter_class = resolve_class_by_metadata_name("", "AdsRequestHelper.CallbackRouter");
+
+    const char* strategy = "unknown";
+    uintptr_t on_reward = resolve_hook_target(base, rva::AdCallbackControl_onReward,
+                                              "AdCallbackControl_onReward", &strategy);
+    if (on_reward && address_in_libil2cpp_exec(on_reward)) {
+        g_adcallback_on_reward = reinterpret_cast<AdCallbackEventFn>(on_reward);
+        LOGD("Resolved AdCallbackControl.onReward helper at %p via %s",
+             reinterpret_cast<void*>(on_reward), strategy);
+    } else {
+        g_adcallback_on_reward = nullptr;
+        LOGD("Unable to resolve AdCallbackControl.onReward helper");
+    }
+
+    strategy = "unknown";
+    uintptr_t on_close = resolve_hook_target(base, rva::AdCallbackControl_onClose,
+                                             "AdCallbackControl_onClose", &strategy);
+    if (on_close && address_in_libil2cpp_exec(on_close)) {
+        g_adcallback_on_close = reinterpret_cast<AdCallbackEventFn>(on_close);
+        LOGD("Resolved AdCallbackControl.onClose helper at %p via %s",
+             reinterpret_cast<void*>(on_close), strategy);
+    } else {
+        g_adcallback_on_close = nullptr;
+        LOGD("Unable to resolve AdCallbackControl.onClose helper");
+    }
+
+#define RESOLVE_AD_EVENT(storage, rva_value, name_text) \
+    do { \
+        strategy = "unknown"; \
+        uintptr_t event_target = resolve_hook_target(base, (rva_value), (name_text), &strategy); \
+        if (event_target && address_in_libil2cpp_exec(event_target)) { \
+            (storage) = reinterpret_cast<AdCallbackEventFn>(event_target); \
+            LOGD("Resolved %s helper at %p via %s", (name_text), reinterpret_cast<void*>(event_target), strategy); \
+        } else { \
+            (storage) = nullptr; \
+            LOGD("Unable to resolve %s helper", (name_text)); \
+        } \
+    } while (0)
+
+    RESOLVE_AD_EVENT(g_wrappeddriver_on_reward, rva::AdsRequestHelper_WrappedDriver_onReward, "WrappedDriver_onReward");
+    RESOLVE_AD_EVENT(g_wrappeddriver_on_close, rva::AdsRequestHelper_WrappedDriver_onClose, "WrappedDriver_onClose");
+    RESOLVE_AD_EVENT(g_combineddriver_on_reward, rva::AdsRequestHelper_CombinedDriver_onReward, "CombinedDriver_onReward");
+    RESOLVE_AD_EVENT(g_combineddriver_on_close, rva::AdsRequestHelper_CombinedDriver_onClose, "CombinedDriver_onClose");
+    RESOLVE_AD_EVENT(g_callbackrouter_on_reward, rva::AdsRequestHelper_CallbackRouter_onReward, "CallbackRouter_onReward");
+    RESOLVE_AD_EVENT(g_callbackrouter_on_close, rva::AdsRequestHelper_CallbackRouter_onClose, "CallbackRouter_onClose");
+
+#undef RESOLVE_AD_EVENT
+}
+
 static void install_gold_ratio_hooks(uintptr_t base) {
     HOOK_FN(base, rva::GameModeBase_GetGoldRatio, hk_game_mode_base_gold_ratio, g_orig_game_mode_base_gold_ratio);
     HOOK_FN(base, rva::GameModeBase_GetDropDataGold, hk_game_mode_base_drop_gold, g_orig_game_mode_base_drop_gold);
@@ -4169,6 +4528,8 @@ static void* hack_thread(void*) {
 
     resolve_runtime_field_offsets();
     resolve_traversal_helpers(il2cpp_base);
+    resolve_movement_helpers(il2cpp_base);
+    resolve_ad_helpers(il2cpp_base);
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
     HOOK_FN(il2cpp_base, rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, hk_get_atk_base, g_orig_get_atk_base);
@@ -4192,6 +4553,16 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::EntityBase_AddInitSkills, hk_entitybase_add_init_skills, g_orig_entitybase_add_init_skills);
     HOOK_FN(il2cpp_base, rva::EntityHitCtrl_SetFlyOne, hk_entityhitctrl_set_fly_one, g_orig_entityhitctrl_set_fly_one);
     HOOK_FN(il2cpp_base, rva::MoveControl_UpdateProgress, hk_movecontrol_update_progress, g_orig_movecontrol_update_progress);
+    HOOK_FN(il2cpp_base, rva::AdCallbackControl_IsLoaded, hk_adcallback_is_loaded, g_orig_adcallback_is_loaded);
+    HOOK_FN(il2cpp_base, rva::AdCallbackControl_Show, hk_adcallback_show, g_orig_adcallback_show);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_ALMaxRewardedDriver_isLoaded, hk_almax_rewarded_is_loaded, g_orig_almax_rewarded_is_loaded);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_ALMaxRewardedDriver_Show, hk_almax_rewarded_show, g_orig_almax_rewarded_show);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_WrappedAdapter_isLoaded, hk_wrapped_adapter_is_loaded, g_orig_wrapped_adapter_is_loaded);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_WrappedAdapter_Show, hk_wrapped_adapter_show, g_orig_wrapped_adapter_show);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_WrappedAdapter_Show_Callback, hk_wrapped_adapter_show_callback, g_orig_wrapped_adapter_show_callback);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, hk_wrapped_adapter_show_callback_source, g_orig_wrapped_adapter_show_callback_source);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, hk_rewarded_high_ecpm_is_loaded, g_orig_rewarded_high_ecpm_is_loaded);
+    HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_show, hk_rewarded_high_ecpm_show, g_orig_rewarded_high_ecpm_show);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
     g_startup_hooks_ready = true;
