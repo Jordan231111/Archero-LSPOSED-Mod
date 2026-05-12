@@ -105,6 +105,24 @@ last.free_story_life_material_before=N
 last.free_story_life_material_after=0
 ```
 
+The module also appends a compact trace to
+`/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_trace.txt`.
+For Free Story persistence, the important sequence is:
+
+```
+send_use_key original_scoped
+modify_key blocked delta=-5 over=1 scoped=1
+life_start ... material=5->0 battleTrans=<id> chap=<chapter>
+creq_item source=send3 type=23 trans=<same id> extra=<new max>
+creq_item source=gameover_add type=23 trans=<same id>
+creq_item source=gameover_remove type=23 trans=<same id>
+stage_init_max current=<next chapter> max_before=<new max> value=<new max>
+```
+
+`gameover_remove` is the cache-clear path after the game-over request succeeds;
+on the next app launch, `stage_init_max` should reload the same advanced
+chapter from server state.
+
 ## Verification recipe
 
 After installing the module and starting a Free Story run from a save with a
@@ -118,6 +136,12 @@ known Key count `K`:
    progress remains advanced.
 5. Disable the hook (`free_story=0`), restart Archero, and verify the counter
    decrements — i.e. only the hook changes behavior.
+
+Live emulator verification on the PR branch reached five consecutive zero-cost
+Free Story clears with `free_story_freeze_key=0` and
+`free_story_skip_predictive=0`. Fresh launches loaded Hero 104, 106, 107, and
+108 from server state after the corresponding clears, confirming the server
+accepted the zero-material battle starts and the game-over packets.
 
 ## Why not patch `GetModeLevelKey`?
 

@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <time.h>
 #include <math.h>
 #include <dlfcn.h>
 #include <elf.h>
@@ -293,7 +295,16 @@ static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
 // against the 7.9.1 Il2CppDumper dump (see docs/free-story-shield.md).
 static constexpr uintptr_t GameLogic_send_use_key = 0x58CB67C;
 static constexpr uintptr_t NetManager_SendInternal_Object = 0x6842E28;
+static constexpr uintptr_t NetManager_SendInternal_Object_Retry = 0x6842EF8;
+static constexpr uintptr_t NetManager_SendInternal_Cache = 0x55CEB50;
+static constexpr uintptr_t CRespItemPacket_get_IsSuccess = 0x55A6B30;
+static constexpr uintptr_t LocalSave_EquipData_AddGameOverPacket = 0x5AF4598;
+static constexpr uintptr_t LocalSave_EquipData_RemoveGameOverPacket = 0x5AF4838;
+static constexpr uintptr_t LocalSave_EquipData_CheckCachedGameOverPacket = 0x5AF48CC;
 static constexpr uintptr_t LocalSave_Modify_Key = 0x5A494C4;
+static constexpr uintptr_t LocalSave_Stage_InitMaxLevel = 0x5B1B140;
+static constexpr uintptr_t LocalSave_Stage_UpdateMaxLevel = 0x5B1BD54;
+static constexpr uintptr_t LocalSave_Stage_InitNextID = 0x5B1BF98;
 static constexpr uintptr_t LocalSave_UserInfo_SetKey = 0x5B1E9E8;
 }
 
@@ -478,6 +489,19 @@ static volatile uint64_t g_hit_free_story_set_key_lower_attempt = 0;
 static volatile uint64_t g_hit_free_story_set_key_blocked = 0;
 static volatile uint64_t g_hit_free_story_set_key_passthrough = 0;
 static volatile uint64_t g_hit_free_story_passthrough = 0;
+static volatile uint64_t g_hit_free_story_req_item_send = 0;
+static volatile uint64_t g_hit_free_story_req_item_retry_send = 0;
+static volatile uint64_t g_hit_free_story_req_item_cache_send = 0;
+static volatile uint64_t g_hit_free_story_resp_item_success = 0;
+static volatile uint64_t g_hit_free_story_resp_item_failure = 0;
+static volatile uint64_t g_hit_free_story_gameover_add = 0;
+static volatile uint64_t g_hit_free_story_gameover_remove = 0;
+static volatile uint64_t g_hit_free_story_gameover_check = 0;
+static volatile uint64_t g_hit_free_story_stage_init_max = 0;
+static volatile uint64_t g_hit_free_story_stage_update_max = 0;
+static volatile uint64_t g_hit_free_story_stage_init_next = 0;
+static volatile uint64_t g_trace_seq = 0;
+static volatile uint64_t g_trace_writes = 0;
 static volatile int64_t g_last_free_story_modify_delta = 0;
 static volatile int32_t g_last_free_story_modify_over = 0;
 static volatile int32_t g_last_free_story_set_key_current = 0;
@@ -489,6 +513,21 @@ static volatile int32_t g_last_free_story_life_material_after = 0;
 static volatile int32_t g_last_free_story_life_type = 0;
 static volatile uint32_t g_last_free_story_life_battle_trans_id = 0;
 static volatile int32_t g_last_free_story_life_chap_id = 0;
+static volatile int32_t g_last_free_story_req_packet_type = 0;
+static volatile int32_t g_last_free_story_req_from_type = 0;
+static volatile uint32_t g_last_free_story_req_trans_id = 0;
+static volatile uint32_t g_last_free_story_req_extra_info = 0;
+static volatile uint32_t g_last_free_story_req_coin = 0;
+static volatile uint32_t g_last_free_story_req_exp = 0;
+static volatile int32_t g_last_free_story_req_life = 0;
+static volatile int32_t g_last_free_story_resp_packet_type = 0;
+static volatile int32_t g_last_free_story_resp_status = 0;
+static volatile int32_t g_last_free_story_resp_success = 0;
+static volatile int32_t g_last_free_story_stage_current = 0;
+static volatile int32_t g_last_free_story_stage_max_before = 0;
+static volatile int32_t g_last_free_story_stage_value = 0;
+static volatile int32_t g_last_free_story_stage_max_after = 0;
+static volatile int32_t g_last_free_story_stage_mode = 0;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
@@ -736,6 +775,29 @@ static float scale_float(float value, float multiplier) {
 
 static void bump(volatile uint64_t& counter, uint64_t amount = 1) {
     counter += amount;
+}
+
+static void append_trace(const char* fmt, ...) {
+    if (!fmt) return;
+    FILE* f = fopen("/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_trace.txt", "a");
+    if (!f) {
+        f = fopen("/data/data/com.habby.archero/files/archero_mod_trace.txt", "a");
+    }
+    if (!f) return;
+
+    uint64_t seq = ++g_trace_seq;
+    time_t now = time(nullptr);
+    fprintf(f, "seq=%llu pid=%d t=%lld ",
+            static_cast<unsigned long long>(seq),
+            getpid(),
+            static_cast<long long>(now));
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fprintf(f, "\n");
+    fclose(f);
+    bump(g_trace_writes);
 }
 
 struct ModuleSegment {
@@ -1681,8 +1743,16 @@ static const HookSpec kHookSpecs[] = {
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr},
     {rva::NetManager_SendInternal_Object, "", "NetManager", "SendInternal", 3, nullptr},
+    {rva::NetManager_SendInternal_Cache, "", "NetManager", "SendInternal", 2, "NetCacheOne"},
+    {rva::CRespItemPacket_get_IsSuccess, "GameProtocol", "CRespItemPacket", "get_IsSuccess", 0, nullptr},
+    {rva::LocalSave_EquipData_AddGameOverPacket, "", "LocalSave.EquipData", "AddGameOverPacket", 1, "CReqItemPacket"},
+    {rva::LocalSave_EquipData_RemoveGameOverPacket, "", "LocalSave.EquipData", "RemoveGameOverPacket", 1, "CReqItemPacket"},
+    {rva::LocalSave_EquipData_CheckCachedGameOverPacket, "", "LocalSave.EquipData", "CheckCachedGameOverPacket", 1, "CReqItemPacket"},
     {rva::GameLogic_send_use_key, "", "GameLogic", "send_use_key", 0, nullptr},
     {rva::LocalSave_Modify_Key, "", "LocalSave", "Modify_Key", 2, nullptr},
+    {rva::LocalSave_Stage_InitMaxLevel, "", "LocalSave.Stage", "InitMaxLevel", 1, nullptr},
+    {rva::LocalSave_Stage_UpdateMaxLevel, "", "LocalSave.Stage", "UpdateMaxLevel", 1, nullptr},
+    {rva::LocalSave_Stage_InitNextID, "", "LocalSave.Stage", "InitNextID", 1, nullptr},
     {rva::LocalSave_UserInfo_SetKey, "", "LocalSave.UserInfo", "SetKey", 1, nullptr},
 };
 
@@ -1704,7 +1774,9 @@ static uintptr_t resolve_hook_target(uintptr_t base, uintptr_t rva_value, const 
             return target;
         }
     }
-    if (rva_value == rva::NetManager_SendInternal_Object) {
+    if (rva_value == rva::NetManager_SendInternal_Object ||
+        rva_value == rva::NetManager_SendInternal_Object_Retry ||
+        rva_value == rva::NetManager_SendInternal_Cache) {
         uintptr_t target = base + rva_value;
         if (address_in_libil2cpp_exec(target)) {
             *strategy = "rva_generic_inst";
@@ -2228,6 +2300,19 @@ static void write_status_file_once() {
     fprintf(f, "hits.free_story_set_key_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_blocked));
     fprintf(f, "hits.free_story_set_key_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_passthrough));
     fprintf(f, "hits.free_story_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_passthrough));
+    fprintf(f, "hits.free_story_req_item_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_send));
+    fprintf(f, "hits.free_story_req_item_retry_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_retry_send));
+    fprintf(f, "hits.free_story_req_item_cache_send=%llu\n", static_cast<unsigned long long>(g_hit_free_story_req_item_cache_send));
+    fprintf(f, "hits.free_story_resp_item_success=%llu\n", static_cast<unsigned long long>(g_hit_free_story_resp_item_success));
+    fprintf(f, "hits.free_story_resp_item_failure=%llu\n", static_cast<unsigned long long>(g_hit_free_story_resp_item_failure));
+    fprintf(f, "hits.free_story_gameover_add=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_add));
+    fprintf(f, "hits.free_story_gameover_remove=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_remove));
+    fprintf(f, "hits.free_story_gameover_check=%llu\n", static_cast<unsigned long long>(g_hit_free_story_gameover_check));
+    fprintf(f, "hits.free_story_stage_init_max=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_init_max));
+    fprintf(f, "hits.free_story_stage_update_max=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_update_max));
+    fprintf(f, "hits.free_story_stage_init_next=%llu\n", static_cast<unsigned long long>(g_hit_free_story_stage_init_next));
+    fprintf(f, "trace_seq=%llu\n", static_cast<unsigned long long>(g_trace_seq));
+    fprintf(f, "trace_writes=%llu\n", static_cast<unsigned long long>(g_trace_writes));
     fprintf(f, "last.free_story_modify_delta=%lld\n", static_cast<long long>(g_last_free_story_modify_delta));
     fprintf(f, "last.free_story_modify_over=%d\n", static_cast<int>(g_last_free_story_modify_over));
     fprintf(f, "last.free_story_set_key_current=%d\n", static_cast<int>(g_last_free_story_set_key_current));
@@ -2239,6 +2324,21 @@ static void write_status_file_once() {
     fprintf(f, "last.free_story_life_type=%d\n", static_cast<int>(g_last_free_story_life_type));
     fprintf(f, "last.free_story_life_battle_trans_id=%u\n", static_cast<unsigned int>(g_last_free_story_life_battle_trans_id));
     fprintf(f, "last.free_story_life_chap_id=%d\n", static_cast<int>(g_last_free_story_life_chap_id));
+    fprintf(f, "last.free_story_req_packet_type=%d\n", static_cast<int>(g_last_free_story_req_packet_type));
+    fprintf(f, "last.free_story_req_from_type=%d\n", static_cast<int>(g_last_free_story_req_from_type));
+    fprintf(f, "last.free_story_req_trans_id=%u\n", static_cast<unsigned int>(g_last_free_story_req_trans_id));
+    fprintf(f, "last.free_story_req_extra_info=%u\n", static_cast<unsigned int>(g_last_free_story_req_extra_info));
+    fprintf(f, "last.free_story_req_coin=%u\n", static_cast<unsigned int>(g_last_free_story_req_coin));
+    fprintf(f, "last.free_story_req_exp=%u\n", static_cast<unsigned int>(g_last_free_story_req_exp));
+    fprintf(f, "last.free_story_req_life=%d\n", static_cast<int>(g_last_free_story_req_life));
+    fprintf(f, "last.free_story_resp_packet_type=%d\n", static_cast<int>(g_last_free_story_resp_packet_type));
+    fprintf(f, "last.free_story_resp_status=%d\n", static_cast<int>(g_last_free_story_resp_status));
+    fprintf(f, "last.free_story_resp_success=%d\n", static_cast<int>(g_last_free_story_resp_success));
+    fprintf(f, "last.free_story_stage_current=%d\n", static_cast<int>(g_last_free_story_stage_current));
+    fprintf(f, "last.free_story_stage_max_before=%d\n", static_cast<int>(g_last_free_story_stage_max_before));
+    fprintf(f, "last.free_story_stage_value=%d\n", static_cast<int>(g_last_free_story_stage_value));
+    fprintf(f, "last.free_story_stage_max_after=%d\n", static_cast<int>(g_last_free_story_stage_max_after));
+    fprintf(f, "last.free_story_stage_mode=%d\n", static_cast<int>(g_last_free_story_stage_mode));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2449,7 +2549,12 @@ using RewardedHighEcpmShowFn = void (*)(void* callback, int32_t source, void* me
 // the hidden IL2CPP MethodInfo* argument the runtime appends to every call.
 using StaticVoidNoArgFn = void (*)(void* method);
 using NetManagerSendInternalObjectFn = void (*)(void* packet, int32_t sendtype, void* callback, void* method);
+using NetManagerSendInternalObjectRetryFn = void (*)(void* packet, int32_t sendtype, int32_t count, int32_t time, void* callback, void* method);
+using NetManagerSendInternalCacheFn = void (*)(void* senddata, void* callback, void* method);
 using LocalSaveModifyKeyFn = void (*)(void* thiz, int64_t key, bool over, void* method);
+using RespItemGetIsSuccessFn = bool (*)(void* thiz, void* method);
+using StageIntFn = void (*)(void* thiz, int32_t value, void* method);
+using EquipGameOverPacketFn = void (*)(void* thiz, void* packet, void* method);
 using UserInfoSetKeyFn = void (*)(void* thiz, int32_t value, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
 static GetMissFn g_orig_get_miss = nullptr;
@@ -2500,9 +2605,20 @@ static RewardedHighEcpmIsLoadedFn g_orig_rewarded_high_ecpm_is_loaded = nullptr;
 static RewardedHighEcpmShowFn g_orig_rewarded_high_ecpm_show = nullptr;
 static StaticVoidNoArgFn g_orig_send_use_key = nullptr;
 static NetManagerSendInternalObjectFn g_orig_netmanager_send_internal_object = nullptr;
+static NetManagerSendInternalObjectRetryFn g_orig_netmanager_send_internal_object_retry = nullptr;
+static NetManagerSendInternalCacheFn g_orig_netmanager_send_internal_cache = nullptr;
 static LocalSaveModifyKeyFn g_orig_localsave_modify_key = nullptr;
+static RespItemGetIsSuccessFn g_orig_crespitempacket_get_is_success = nullptr;
+static StageIntFn g_orig_stage_init_max_level = nullptr;
+static StageIntFn g_orig_stage_update_max_level = nullptr;
+static StageIntFn g_orig_stage_init_next_id = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_add_gameover_packet = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_remove_gameover_packet = nullptr;
+static EquipGameOverPacketFn g_orig_equipdata_check_cached_gameover_packet = nullptr;
 static UserInfoSetKeyFn g_orig_userinfo_set_key = nullptr;
 static void* g_clife_trans_packet_class = nullptr;
+static void* g_creq_item_packet_class = nullptr;
+static void* g_cresp_item_packet_class = nullptr;
 static void* g_adcallback_control_class = nullptr;
 static void* g_wrappeddriver_class = nullptr;
 static void* g_combineddriver_class = nullptr;
@@ -3278,6 +3394,62 @@ static bool hk_wrapped_adapter_show_callback_source(void* thiz, void* callback, 
     return g_orig_wrapped_adapter_show_callback_source ? g_orig_wrapped_adapter_show_callback_source(thiz, callback, source, method) : false;
 }
 
+static bool is_creq_item_packet(void* packet) {
+    return packet && g_creq_item_packet_class && is_instance_of_class(packet, g_creq_item_packet_class);
+}
+
+static bool log_creq_item_packet(const char* source, void* packet, int32_t sendtype) {
+    if (!is_creq_item_packet(packet)) return false;
+    uint8_t* base = reinterpret_cast<uint8_t*>(packet);
+    uint32_t trans_id = *reinterpret_cast<uint32_t*>(base + 0x28);
+    uint16_t packet_type = *reinterpret_cast<uint16_t*>(base + 0x2C);
+    uint16_t from_type = *reinterpret_cast<uint16_t*>(base + 0x2E);
+    uint32_t extra_info = *reinterpret_cast<uint32_t*>(base + 0x30);
+    uint32_t coin = *reinterpret_cast<uint32_t*>(base + 0x34);
+    uint16_t life = *reinterpret_cast<uint16_t*>(base + 0x3C);
+    uint32_t exp = *reinterpret_cast<uint32_t*>(base + 0x40);
+
+    g_last_free_story_req_packet_type = packet_type;
+    g_last_free_story_req_from_type = from_type;
+    g_last_free_story_req_trans_id = trans_id;
+    g_last_free_story_req_extra_info = extra_info;
+    g_last_free_story_req_coin = coin;
+    g_last_free_story_req_exp = exp;
+    g_last_free_story_req_life = life;
+    append_trace("creq_item source=%s sendtype=%d type=%u from=%u trans=%u extra=%u coin=%u exp=%u life=%u",
+                 source ? source : "unknown",
+                 sendtype,
+                 static_cast<unsigned>(packet_type),
+                 static_cast<unsigned>(from_type),
+                 static_cast<unsigned>(trans_id),
+                 static_cast<unsigned>(extra_info),
+                 static_cast<unsigned>(coin),
+                 static_cast<unsigned>(exp),
+                 static_cast<unsigned>(life));
+    LOGD("FreeStory CReqItemPacket source=%s sendtype=%d type=%u trans=%u extra=%u life=%u",
+         source ? source : "unknown", sendtype, static_cast<unsigned>(packet_type),
+         static_cast<unsigned>(trans_id), static_cast<unsigned>(extra_info),
+         static_cast<unsigned>(life));
+    return true;
+}
+
+static void log_stage_transition(const char* source, void* thiz, int32_t value, int32_t max_before, int32_t max_after) {
+    int32_t current = 0;
+    int32_t mode = 0;
+    if (thiz) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(thiz);
+        current = *reinterpret_cast<int32_t*>(base + 0x30);
+        mode = *reinterpret_cast<int32_t*>(base + 0x48);
+    }
+    g_last_free_story_stage_current = current;
+    g_last_free_story_stage_max_before = max_before;
+    g_last_free_story_stage_value = value;
+    g_last_free_story_stage_max_after = max_after;
+    g_last_free_story_stage_mode = mode;
+    append_trace("stage_%s current=%d max_before=%d value=%d max_after=%d mode=%d",
+                 source ? source : "unknown", current, max_before, value, max_after, mode);
+}
+
 static bool scoped_life_trans_packet(void* packet) {
     if (!packet || !g_in_free_story_send_use_key) return false;
     if (!g_clife_trans_packet_class) return true;
@@ -3285,10 +3457,14 @@ static bool scoped_life_trans_packet(void* packet) {
 }
 
 static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, void* callback, void* method) {
+    if (log_creq_item_packet("send3", packet, sendtype)) {
+        bump(g_hit_free_story_req_item_send);
+    }
     if (g_enable_free_story && scoped_life_trans_packet(packet)) {
         uint8_t* base = reinterpret_cast<uint8_t*>(packet);
         uint16_t* material = reinterpret_cast<uint16_t*>(base + 0x2C);
         uint8_t* type = reinterpret_cast<uint8_t*>(base + 0x2E);
+        uint8_t* offline = reinterpret_cast<uint8_t*>(base + 0x2F);
         uint32_t* battle_trans_id = reinterpret_cast<uint32_t*>(base + 0x30);
         uint16_t* chap_id = reinterpret_cast<uint16_t*>(base + 0x34);
 
@@ -3301,12 +3477,20 @@ static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, v
         if (*type == 1 && *material > 0) {
             *material = 0;
             bump(g_hit_free_story_life_packet_zeroed);
+            append_trace("life_start source=send3 sendtype=%d type=%u offline=%u material=%d->0 battleTrans=%u chap=%u",
+                         sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*offline),
+                         static_cast<int>(g_last_free_story_life_material_before),
+                         static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
             LOGD("FreeStory CLifeTransPacket zeroed sendtype=%d type=%u material=%d->0 battleTrans=%u chap=%u",
                  sendtype, static_cast<unsigned>(*type),
                  static_cast<int>(g_last_free_story_life_material_before),
                  static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
         } else {
             bump(g_hit_free_story_life_packet_passthrough);
+            append_trace("life_start source=send3 sendtype=%d type=%u offline=%u material=%u passthrough battleTrans=%u chap=%u",
+                         sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*offline),
+                         static_cast<unsigned>(*material),
+                         static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
             LOGD("FreeStory CLifeTransPacket passthrough sendtype=%d type=%u material=%u battleTrans=%u chap=%u",
                  sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*material),
                  static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
@@ -3319,6 +3503,32 @@ static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, v
     }
 }
 
+static void hk_netmanager_send_internal_object_retry(void* packet, int32_t sendtype, int32_t count, int32_t time, void* callback, void* method) {
+    if (log_creq_item_packet("send5", packet, sendtype)) {
+        bump(g_hit_free_story_req_item_retry_send);
+        append_trace("creq_item_retry count=%d time=%d", count, time);
+    }
+    if (g_orig_netmanager_send_internal_object_retry) {
+        g_orig_netmanager_send_internal_object_retry(packet, sendtype, count, time, callback, method);
+    }
+}
+
+static void hk_netmanager_send_internal_cache(void* senddata, void* callback, void* method) {
+    if (senddata) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(senddata);
+        uint16_t sendcode = *reinterpret_cast<uint16_t*>(base + 0x10);
+        int32_t trycount = *reinterpret_cast<int32_t*>(base + 0x14);
+        void* data = *reinterpret_cast<void**>(base + 0x18);
+        if (log_creq_item_packet("cache", data, sendcode)) {
+            bump(g_hit_free_story_req_item_cache_send);
+            append_trace("netcache sendcode=%u trycount=%d", static_cast<unsigned>(sendcode), trycount);
+        }
+    }
+    if (g_orig_netmanager_send_internal_cache) {
+        g_orig_netmanager_send_internal_cache(senddata, callback, method);
+    }
+}
+
 // Tier S.1 — preserve the original battle-start path but make its life/key
 // transaction zero-cost. Blocking send_use_key entirely preserves keys but also
 // prevents the server from seeing a battle start, so completed stage progress
@@ -3326,6 +3536,7 @@ static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, v
 static void hk_send_use_key(void* method) {
     if (g_enable_free_story) {
         bump(g_hit_free_story_send_original);
+        append_trace("send_use_key original_scoped");
         LOGD("FreeStory send_use_key original with zero-cost life transaction");
         bool previous = g_in_free_story_send_use_key;
         g_in_free_story_send_use_key = true;
@@ -3334,6 +3545,7 @@ static void hk_send_use_key(void* method) {
         return;
     }
     bump(g_hit_free_story_passthrough);
+    append_trace("send_use_key passthrough");
     LOGD("FreeStory send_use_key passthrough");
     if (g_orig_send_use_key) g_orig_send_use_key(method);
 }
@@ -3349,12 +3561,19 @@ static void hk_localsave_modify_key(void* thiz, int64_t key, bool over, void* me
         (g_enable_free_story_skip_predictive || (g_enable_free_story && g_in_free_story_send_use_key));
     if (block_predictive) {
         bump(g_hit_free_story_modify_blocked);
+        append_trace("modify_key blocked delta=%lld over=%d scoped=%d",
+                     static_cast<long long>(key), over ? 1 : 0,
+                     (g_enable_free_story && g_in_free_story_send_use_key) ? 1 : 0);
         LOGD("FreeStory Modify_Key blocked delta=%lld over=%d scoped=%d",
              static_cast<long long>(key), over ? 1 : 0,
              (g_enable_free_story && g_in_free_story_send_use_key) ? 1 : 0);
         return;
     }
     bump(g_hit_free_story_modify_passthrough);
+    if (key < 0) {
+        append_trace("modify_key passthrough delta=%lld over=%d",
+                     static_cast<long long>(key), over ? 1 : 0);
+    }
     LOGD("FreeStory Modify_Key passthrough delta=%lld over=%d",
          static_cast<long long>(key), over ? 1 : 0);
     if (g_orig_localsave_modify_key) g_orig_localsave_modify_key(thiz, key, over, method);
@@ -3378,10 +3597,13 @@ static void hk_userinfo_set_key(void* thiz, int32_t value, void* method) {
     g_last_free_story_set_key_had_offset = have_current ? 1 : 0;
     if (have_current && value < current) {
         bump(g_hit_free_story_set_key_lower_attempt);
+        append_trace("set_key lower_attempt current=%d value=%d freeze=%d",
+                     current, value, g_enable_free_story_freeze_key ? 1 : 0);
     }
     if (g_enable_free_story_freeze_key && have_current) {
         if (value < current) {
             bump(g_hit_free_story_set_key_blocked);
+            append_trace("set_key blocked current=%d value=%d", current, value);
             LOGD("FreeStory SetKey blocked current=%d value=%d", current, value);
             return;
         }
@@ -3390,6 +3612,78 @@ static void hk_userinfo_set_key(void* thiz, int32_t value, void* method) {
     LOGD("FreeStory SetKey passthrough current=%d value=%d have_current=%d",
          current, value, have_current ? 1 : 0);
     if (g_orig_userinfo_set_key) g_orig_userinfo_set_key(thiz, value, method);
+}
+
+static bool hk_crespitempacket_get_is_success(void* thiz, void* method) {
+    bool success = g_orig_crespitempacket_get_is_success ?
+        g_orig_crespitempacket_get_is_success(thiz, method) : false;
+    uint16_t packet_type = 0;
+    uint16_t status = 0xffff;
+    if (thiz) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(thiz);
+        void* comm_msg = *reinterpret_cast<void**>(base + 0x10);
+        packet_type = *reinterpret_cast<uint16_t*>(base + 0x20);
+        if (comm_msg) {
+            status = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(comm_msg) + 0x10);
+        }
+    }
+    g_last_free_story_resp_packet_type = packet_type;
+    g_last_free_story_resp_status = static_cast<int32_t>(static_cast<int16_t>(status));
+    g_last_free_story_resp_success = success ? 1 : 0;
+    if (success) {
+        bump(g_hit_free_story_resp_item_success);
+    } else {
+        bump(g_hit_free_story_resp_item_failure);
+    }
+    append_trace("cresp_item is_success=%d packet_type=%u status=%d",
+                 success ? 1 : 0, static_cast<unsigned>(packet_type),
+                 static_cast<int>(static_cast<int16_t>(status)));
+    LOGD("FreeStory CRespItemPacket IsSuccess=%d packet_type=%u status=%d",
+         success ? 1 : 0, static_cast<unsigned>(packet_type),
+         static_cast<int>(static_cast<int16_t>(status)));
+    return success;
+}
+
+static void hk_stage_init_max_level(void* thiz, int32_t value, void* method) {
+    int32_t before = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x3C) : 0;
+    if (g_orig_stage_init_max_level) g_orig_stage_init_max_level(thiz, value, method);
+    int32_t after = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x3C) : 0;
+    bump(g_hit_free_story_stage_init_max);
+    log_stage_transition("init_max", thiz, value, before, after);
+}
+
+static void hk_stage_update_max_level(void* thiz, int32_t value, void* method) {
+    int32_t before = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x3C) : 0;
+    if (g_orig_stage_update_max_level) g_orig_stage_update_max_level(thiz, value, method);
+    int32_t after = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x3C) : 0;
+    bump(g_hit_free_story_stage_update_max);
+    log_stage_transition("update_max", thiz, value, before, after);
+}
+
+static void hk_stage_init_next_id(void* thiz, int32_t value, void* method) {
+    int32_t before = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x30) : 0;
+    if (g_orig_stage_init_next_id) g_orig_stage_init_next_id(thiz, value, method);
+    int32_t after = thiz ? *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(thiz) + 0x30) : 0;
+    bump(g_hit_free_story_stage_init_next);
+    append_trace("stage_init_next current_before=%d value=%d current_after=%d", before, value, after);
+}
+
+static void hk_equipdata_add_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_add);
+    log_creq_item_packet("gameover_add", packet, -1);
+    if (g_orig_equipdata_add_gameover_packet) g_orig_equipdata_add_gameover_packet(thiz, packet, method);
+}
+
+static void hk_equipdata_remove_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_remove);
+    log_creq_item_packet("gameover_remove", packet, -1);
+    if (g_orig_equipdata_remove_gameover_packet) g_orig_equipdata_remove_gameover_packet(thiz, packet, method);
+}
+
+static void hk_equipdata_check_cached_gameover_packet(void* thiz, void* packet, void* method) {
+    bump(g_hit_free_story_gameover_check);
+    log_creq_item_packet("gameover_check", packet, -1);
+    if (g_orig_equipdata_check_cached_gameover_packet) g_orig_equipdata_check_cached_gameover_packet(thiz, packet, method);
 }
 
 static bool is_gold_drop_type(int32_t type) {
@@ -4171,6 +4465,8 @@ static void* hack_thread(void*) {
     resolve_movement_helpers(il2cpp_base);
     resolve_ad_helpers(il2cpp_base);
     g_clife_trans_packet_class = resolve_class_by_metadata_name("GameProtocol", "CLifeTransPacket");
+    g_creq_item_packet_class = resolve_class_by_metadata_name("GameProtocol", "CReqItemPacket");
+    g_cresp_item_packet_class = resolve_class_by_metadata_name("GameProtocol", "CRespItemPacket");
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
     HOOK_FN(il2cpp_base, rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, hk_get_atk_base, g_orig_get_atk_base);
@@ -4207,8 +4503,17 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
     HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Object, hk_netmanager_send_internal_object, g_orig_netmanager_send_internal_object);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Object_Retry, hk_netmanager_send_internal_object_retry, g_orig_netmanager_send_internal_object_retry);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Cache, hk_netmanager_send_internal_cache, g_orig_netmanager_send_internal_cache);
     HOOK_FN(il2cpp_base, rva::GameLogic_send_use_key, hk_send_use_key, g_orig_send_use_key);
     HOOK_FN(il2cpp_base, rva::LocalSave_Modify_Key, hk_localsave_modify_key, g_orig_localsave_modify_key);
+    HOOK_FN(il2cpp_base, rva::CRespItemPacket_get_IsSuccess, hk_crespitempacket_get_is_success, g_orig_crespitempacket_get_is_success);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_AddGameOverPacket, hk_equipdata_add_gameover_packet, g_orig_equipdata_add_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_RemoveGameOverPacket, hk_equipdata_remove_gameover_packet, g_orig_equipdata_remove_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_EquipData_CheckCachedGameOverPacket, hk_equipdata_check_cached_gameover_packet, g_orig_equipdata_check_cached_gameover_packet);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_InitMaxLevel, hk_stage_init_max_level, g_orig_stage_init_max_level);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_UpdateMaxLevel, hk_stage_update_max_level, g_orig_stage_update_max_level);
+    HOOK_FN(il2cpp_base, rva::LocalSave_Stage_InitNextID, hk_stage_init_next_id, g_orig_stage_init_next_id);
     HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetKey, hk_userinfo_set_key, g_orig_userinfo_set_key);
     g_startup_hooks_ready = true;
 
