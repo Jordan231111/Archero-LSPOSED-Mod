@@ -287,6 +287,20 @@ static constexpr uintptr_t LocalSave_BattleIn_CanDropEquip = 0x5A4FA98;
 static constexpr uintptr_t LocalSave_get_CanDropType501Equip = 0x5A5B448;
 static constexpr uintptr_t LocalSave_get_CanDropType401Or402Equip = 0x5A5B03C;
 static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
+
+// Server-validation client functions. These RVAs are sentinels only:
+// the runtime resolver finds them by IL2CPP metadata (class + method +
+// arg_count). The hook report identifies them as the client-side
+// settlement-validation boundary, but does not list verified v7.9.1
+// RVAs. RVA fallback intentionally fails because these sentinels land
+// outside libil2cpp.so's executable mappings; the existing
+// address_in_libil2cpp_exec() check in install_hook() then skips the
+// hook safely if metadata resolution did not find the method.
+static constexpr uintptr_t BattleModuleData_BuildCheatData = 0xFE000001;
+static constexpr uintptr_t HTTPSendClient_CheckGameOverCheat = 0xFE000002;
+static constexpr uintptr_t LocalSave_BattleIn_DropEquipByServer = 0xFE000003;
+static constexpr uintptr_t LocalSave_BattleIn_DropEquipDataByTransId = 0xFE000004;
+static constexpr uintptr_t GameOverModeCtrlBase_CheckDropEquipsByServer = 0xFE000005;
 }
 
 static constexpr uintptr_t kIl2CppObjectHeaderSize = 0x10;
@@ -350,6 +364,11 @@ static volatile bool g_enable_move_speed = true;
 static volatile bool g_skip_rewarded_ads = true;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
+static volatile bool g_force_server_validation = true;
+static volatile bool g_force_server_validation_installed = false;
+static volatile bool g_dump_netcacheone = true;
+static volatile bool g_replay_netcacheone = true;
+static volatile uint32_t g_netcacheone_dump_max_depth = 1;
 static volatile bool g_tiny_direct_patch = false;
 static volatile bool g_gold_add_scale = false;
 static volatile bool g_gold_get_fixed = false;
@@ -442,6 +461,16 @@ static volatile uint64_t g_hit_skill_confirm_unavailable = 0;
 static volatile uint64_t g_hit_game_speed_get = 0;
 static volatile uint64_t g_hit_game_speed_set = 0;
 static volatile uint64_t g_hit_game_speed_apply = 0;
+static volatile uint64_t g_hit_validate_build_cheat = 0;
+static volatile uint64_t g_hit_validate_check_gameover_cheat = 0;
+static volatile uint64_t g_hit_validate_drop_equip_by_server = 0;
+static volatile uint64_t g_hit_validate_drop_equip_data_by_transid = 0;
+static volatile uint64_t g_hit_validate_check_drop_equips_by_server = 0;
+static volatile uint64_t g_hit_force_build_cheat_invoked = 0;
+static volatile uint64_t g_hit_force_build_cheat_missed = 0;
+static volatile uint64_t g_hit_netcacheone_dump = 0;
+static volatile uint64_t g_hit_netcacheone_replay = 0;
+static volatile uint64_t g_hit_netcacheone_replay_skipped = 0;
 static volatile uint64_t g_hit_ad_skip_isloaded = 0;
 static volatile uint64_t g_hit_ad_skip_show = 0;
 static volatile uint64_t g_hit_ad_skip_high_ecpm = 0;
@@ -453,6 +482,34 @@ static volatile uint64_t g_hit_ad_skip_passthrough = 0;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
+
+// Live BattleModuleData pointer captured from BattleModuleData.AddGold during
+// an active run. Used at settlement time (LocalSave.BattleIn_UpdateGold) to
+// re-invoke BuildCheatData so the cheat-data payload is rebuilt against the
+// final coherent battle state right before the gameover packet is sent.
+// Cleared at the start of each fresh run on a best-effort basis.
+static void* volatile g_force_validate_battle_module_thiz = nullptr;
+
+// Per-function install guards. install_gold_hooks_once() and
+// install_force_server_validation_hooks_once() can independently want to
+// hook BattleModuleData.AddGold / LocalSave.BattleIn_UpdateGold, but each
+// IL2CPP target may only be A64HookFunction'd once.
+static volatile bool g_hooked_add_gold_float = false;
+static volatile bool g_hooked_add_gold_int = false;
+static volatile bool g_hooked_battlein_update_gold = false;
+static volatile bool g_hooked_validate_build_cheat_data = false;
+static volatile bool g_hooked_validate_check_gameover_cheat = false;
+static volatile bool g_hooked_validate_drop_equip_by_server = false;
+static volatile bool g_hooked_validate_drop_equip_data_by_transid = false;
+static volatile bool g_hooked_validate_check_drop_equips_by_server = false;
+
+// Trampoline for BattleModuleData.BuildCheatData. Declared here (ahead of
+// most hooks) because hk_battlein_update_gold() re-invokes it at settlement
+// time to force a cheat-data rebuild against the final coherent battle
+// state. The hook function itself is defined further down with the other
+// force_server_validation hooks.
+using BuildCheatDataFn = void* (*)(void* thiz, void* method);
+static BuildCheatDataFn g_orig_build_cheat_data = nullptr;
 static volatile bool g_default_config_created = false;
 static char g_last_resolve_error[192] = "none";
 static char g_last_metadata_state[256] = "none";
@@ -741,6 +798,13 @@ struct Il2CppApi {
     void* (*method_get_pointer)(void*);
     const char* (*field_get_name)(void*);
     size_t (*field_get_offset)(void*);
+    void* (*object_get_class)(void*);
+    void* (*field_get_type)(void*);
+    uint32_t (*gchandle_new)(void*, int);
+    void (*gchandle_free)(uint32_t);
+    void* (*gchandle_get_target)(uint32_t);
+    void* (*string_chars)(void*);
+    int32_t (*string_length)(void*);
 };
 
 static Il2CppApi g_il2cpp_api = {};
@@ -1001,8 +1065,13 @@ static bool resolve_il2cpp_api() {
     g_il2cpp_api.type_get_name = reinterpret_cast<char* (*)(void*)>(resolve_symbol("il2cpp_type_get_name"));
     g_il2cpp_api.free = reinterpret_cast<void (*)(void*)>(resolve_symbol("il2cpp_free"));
     g_il2cpp_api.method_get_pointer = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_method_get_pointer"));
-    g_il2cpp_api.field_get_name = reinterpret_cast<const char* (*)(void*)>(resolve_symbol("il2cpp_field_get_name"));
-    g_il2cpp_api.field_get_offset = reinterpret_cast<size_t (*)(void*)>(resolve_symbol("il2cpp_field_get_offset"));
+    g_il2cpp_api.object_get_class = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_object_get_class"));
+    g_il2cpp_api.field_get_type = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_field_get_type"));
+    g_il2cpp_api.gchandle_new = reinterpret_cast<uint32_t (*)(void*, int)>(resolve_symbol("il2cpp_gchandle_new"));
+    g_il2cpp_api.gchandle_free = reinterpret_cast<void (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_free"));
+    g_il2cpp_api.gchandle_get_target = reinterpret_cast<void* (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_get_target"));
+    g_il2cpp_api.string_chars = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_string_chars"));
+    g_il2cpp_api.string_length = reinterpret_cast<int32_t (*)(void*)>(resolve_symbol("il2cpp_string_length"));
     bool ok = g_il2cpp_api.domain_assembly_open &&
               g_il2cpp_api.assembly_get_image && g_il2cpp_api.class_from_name &&
               g_il2cpp_api.class_get_method_from_name;
@@ -1439,6 +1508,11 @@ static const HookSpec kHookSpecs[] = {
     {rva::LocalSave_get_CanDropType501Equip, "", "LocalSave", "get_CanDropType501Equip", 0, nullptr},
     {rva::LocalSave_get_CanDropType401Or402Equip, "", "LocalSave", "get_CanDropType401Or402Equip", 0, nullptr},
     {rva::LocalSave_get_CanDropFirstEquip, "", "LocalSave", "get_CanDropFirstEquip", 0, nullptr},
+    {rva::BattleModuleData_BuildCheatData, "", "BattleModuleData", "BuildCheatData", 0, nullptr},
+    {rva::HTTPSendClient_CheckGameOverCheat, "", "HTTPSendClient", "CheckGameOverCheat", 1, nullptr},
+    {rva::LocalSave_BattleIn_DropEquipByServer, "", "LocalSave", "get_BattleIn_DropEquipByServer", 0, nullptr},
+    {rva::LocalSave_BattleIn_DropEquipDataByTransId, "", "LocalSave", "BattleIn_DropEquipDataByTransId", 1, nullptr},
+    {rva::GameOverModeCtrlBase_CheckDropEquipsByServer, "", "GameOverModeCtrlBase", "CheckDropEquipsByServer", 1, nullptr},
     {rva::IStageLayerManager_GetEquipMaxDrop, "", "IStageLayerManager", "GetEquipMaxDrop", 0, nullptr},
     {rva::IStageLayerManager_GetMPMaxDrop, "", "IStageLayerManager", "GetMPMaxDrop", 0, nullptr},
     {rva::IStageLayerManager_GetScrollMaxDrop, "", "IStageLayerManager", "GetScrollMaxDrop", 0, nullptr},
@@ -1780,6 +1854,10 @@ static bool write_default_config_file(const char* path) {
         "move_speed_multiplier=1\n"
         "skip_rewarded_ads=1\n"
         "install_gold_hooks=0\n"
+        "force_server_validation=1\n"
+        "dump_netcacheone=1\n"
+        "replay_netcacheone=1\n"
+        "netcacheone_dump_max_depth=1\n"
         "tiny_direct_patch=0\n"
         "gold_add_scale=0\n"
         "gold_get_fixed=0\n"
@@ -1913,6 +1991,14 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "move_speed") == 0) g_enable_move_speed = parse_bool_value(value);
     else if (strcmp(key, "skip_rewarded_ads") == 0) g_skip_rewarded_ads = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
+    else if (strcmp(key, "force_server_validation") == 0) g_force_server_validation = parse_bool_value(value);
+    else if (strcmp(key, "dump_netcacheone") == 0) g_dump_netcacheone = parse_bool_value(value);
+    else if (strcmp(key, "replay_netcacheone") == 0) g_replay_netcacheone = parse_bool_value(value);
+    else if (strcmp(key, "netcacheone_dump_max_depth") == 0) {
+        long v = strtol(value, nullptr, 10);
+        if (v < 0) v = 0; if (v > 8) v = 8;
+        g_netcacheone_dump_max_depth = static_cast<uint32_t>(v);
+    }
     else if (strcmp(key, "tiny_direct_patch") == 0) g_tiny_direct_patch = parse_bool_value(value);
     else if (strcmp(key, "gold_add_scale") == 0) g_gold_add_scale = parse_bool_value(value);
     else if (strcmp(key, "gold_get_fixed") == 0) g_gold_get_fixed = parse_bool_value(value);
@@ -2005,6 +2091,7 @@ static void load_config_file_once() {
 }
 
 static void install_gold_hooks_once(uintptr_t base);
+static void install_force_server_validation_hooks_once(uintptr_t base);
 
 static void write_status_file_once() {
     FILE* f = fopen("/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_status.txt", "w");
@@ -2044,6 +2131,19 @@ static void write_status_file_once() {
     fprintf(f, "skip_rewarded_ads=%d\n", g_skip_rewarded_ads ? 1 : 0);
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
+    fprintf(f, "force_server_validation=%d\n", g_force_server_validation ? 1 : 0);
+    fprintf(f, "force_server_validation_installed=%d\n", g_force_server_validation_installed ? 1 : 0);
+    fprintf(f, "dump_netcacheone=%d\n", g_dump_netcacheone ? 1 : 0);
+    fprintf(f, "replay_netcacheone=%d\n", g_replay_netcacheone ? 1 : 0);
+    fprintf(f, "netcacheone_dump_max_depth=%u\n", static_cast<unsigned>(g_netcacheone_dump_max_depth));
+    fprintf(f, "hooks.validate_build_cheat=%d\n", g_hooked_validate_build_cheat_data ? 1 : 0);
+    fprintf(f, "hooks.validate_check_gameover_cheat=%d\n", g_hooked_validate_check_gameover_cheat ? 1 : 0);
+    fprintf(f, "hooks.validate_drop_equip_by_server=%d\n", g_hooked_validate_drop_equip_by_server ? 1 : 0);
+    fprintf(f, "hooks.validate_drop_equip_data_by_transid=%d\n", g_hooked_validate_drop_equip_data_by_transid ? 1 : 0);
+    fprintf(f, "hooks.validate_check_drop_equips_by_server=%d\n", g_hooked_validate_check_drop_equips_by_server ? 1 : 0);
+    fprintf(f, "hooks.capture_add_gold_float=%d\n", g_hooked_add_gold_float ? 1 : 0);
+    fprintf(f, "hooks.capture_add_gold_int=%d\n", g_hooked_add_gold_int ? 1 : 0);
+    fprintf(f, "hooks.capture_battlein_update_gold=%d\n", g_hooked_battlein_update_gold ? 1 : 0);
     fprintf(f, "hook_installed_count=%llu\n", static_cast<unsigned long long>(g_hook_installed_count));
     fprintf(f, "hook_skipped_tiny_count=%llu\n", static_cast<unsigned long long>(g_hook_skipped_tiny_count));
     fprintf(f, "resolver.metadata=%llu\n", static_cast<unsigned long long>(g_resolve_metadata_count));
@@ -2146,6 +2246,16 @@ static void write_status_file_once() {
     fprintf(f, "hits.game_speed_get=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_get));
     fprintf(f, "hits.game_speed_set=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_set));
     fprintf(f, "hits.game_speed_apply=%llu\n", static_cast<unsigned long long>(g_hit_game_speed_apply));
+    fprintf(f, "hits.validate_build_cheat=%llu\n", static_cast<unsigned long long>(g_hit_validate_build_cheat));
+    fprintf(f, "hits.validate_check_gameover_cheat=%llu\n", static_cast<unsigned long long>(g_hit_validate_check_gameover_cheat));
+    fprintf(f, "hits.validate_drop_equip_by_server=%llu\n", static_cast<unsigned long long>(g_hit_validate_drop_equip_by_server));
+    fprintf(f, "hits.validate_drop_equip_data_by_transid=%llu\n", static_cast<unsigned long long>(g_hit_validate_drop_equip_data_by_transid));
+    fprintf(f, "hits.validate_check_drop_equips_by_server=%llu\n", static_cast<unsigned long long>(g_hit_validate_check_drop_equips_by_server));
+    fprintf(f, "hits.force_build_cheat_invoked=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_invoked));
+    fprintf(f, "hits.force_build_cheat_missed=%llu\n", static_cast<unsigned long long>(g_hit_force_build_cheat_missed));
+    fprintf(f, "hits.netcacheone_dump=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_dump));
+    fprintf(f, "hits.netcacheone_replay=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay));
+    fprintf(f, "hits.netcacheone_replay_skipped=%llu\n", static_cast<unsigned long long>(g_hit_netcacheone_replay_skipped));
     fprintf(f, "hits.ad_skip_isloaded=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_isloaded));
     fprintf(f, "hits.ad_skip_show=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_show));
     fprintf(f, "hits.ad_skip_high_ecpm=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_high_ecpm));
@@ -2163,6 +2273,9 @@ static void* config_thread(void*) {
         load_config_file_once();
         if (g_install_gold_hooks && g_il2cpp_base != 0 && g_startup_hooks_ready && !g_gold_hooks_installed) {
             install_gold_hooks_once(g_il2cpp_base);
+        }
+        if (g_force_server_validation && g_il2cpp_base != 0 && g_startup_hooks_ready && !g_force_server_validation_installed) {
+            install_force_server_validation_hooks_once(g_il2cpp_base);
         }
         if (g_il2cpp_base != 0 && g_startup_hooks_ready) {
             update_tiny_direct_patches(g_il2cpp_base);
@@ -2745,6 +2858,9 @@ static Vector3Lite hk_entitybase_check_pos(void* thiz, Vector3Lite pos, void* me
 
 static void hk_entitybase_add_init_skills(void* thiz, void* method) {
     if (g_orig_entitybase_add_init_skills) g_orig_entitybase_add_init_skills(thiz, method);
+    if (g_force_server_validation && is_hero_entity_base(thiz)) {
+        g_force_validate_battle_module_thiz = nullptr;
+    }
     inject_hero_battle_skills(thiz, true);
     apply_hero_traversal_runtime(thiz);
 }
@@ -3262,6 +3378,9 @@ static ListReturnFn g_orig_drop_manager_get_drop_list = nullptr;
 
 static void hk_add_gold_float(void* thiz, float value, void* method) {
     bump(g_hit_add_gold);
+    if (g_force_server_validation) {
+        g_force_validate_battle_module_thiz = thiz;
+    }
     if (!g_orig_add_gold_float) return;
     if (g_gold_add_scale) value = scale_float(value, g_gold_multiplier);
     g_orig_add_gold_float(thiz, value, method);
@@ -3269,6 +3388,9 @@ static void hk_add_gold_float(void* thiz, float value, void* method) {
 
 static void hk_add_gold_int(void* thiz, int32_t value, void* method) {
     bump(g_hit_add_gold);
+    if (g_force_server_validation) {
+        g_force_validate_battle_module_thiz = thiz;
+    }
     if (!g_orig_add_gold_int) return;
     if (g_gold_add_scale) value = scale_int32(value, g_gold_multiplier);
     g_orig_add_gold_int(thiz, value, method);
@@ -3288,10 +3410,25 @@ static float hk_battle_get_gold(void* thiz, void* method) {
 
 static void hk_battlein_update_gold(void* thiz, float gold, void* method) {
     bump(g_hit_stage_balance);
-    if (!g_orig_battlein_update_gold) return;
-    if (g_gold_update_fixed) gold = g_stage_gold_fixed;
-    else if (g_gold_update_scale) gold = scale_float(gold, g_gold_multiplier);
-    g_orig_battlein_update_gold(thiz, gold, method);
+    if (g_orig_battlein_update_gold) {
+        if (g_gold_update_fixed) gold = g_stage_gold_fixed;
+        else if (g_gold_update_scale) gold = scale_float(gold, g_gold_multiplier);
+        g_orig_battlein_update_gold(thiz, gold, method);
+    }
+    // Force-invoke BuildCheatData on the cached BattleModuleData* at
+    // settlement time so the cheat-data payload is rebuilt with the final
+    // battle state right before the gameover packet is sent. Pass-through:
+    // never alters return values or fabricates objects; only re-invokes a
+    // zero-arg client method on a pointer the game itself just used.
+    if (g_force_server_validation && g_orig_build_cheat_data) {
+        void* cached = g_force_validate_battle_module_thiz;
+        if (cached) {
+            g_orig_build_cheat_data(cached, nullptr);
+            bump(g_hit_force_build_cheat_invoked);
+        } else {
+            bump(g_hit_force_build_cheat_missed);
+        }
+    }
 }
 
 static float hk_battlein_get_gold(void* thiz, void* method) {
@@ -3886,20 +4023,298 @@ static void install_max_cap_hooks(uintptr_t base) {
     HOOK_FN(base, rva::DailyStageChapter_GetPropMaxDropById, hk_daily_prop_max_by_id, g_orig_daily_prop_max_by_id);
 }
 
+// Pass-through hooks on the post-battle server-validation client
+// methods identified by the static dump. The hooks only call the
+// original and bump a counter so the runtime status file confirms
+// each validation path actually runs for every battle. They never
+// alter the return value or suppress the call: the server remains
+// the authority for settlement.
+using CheckGameOverCheatFn = void (*)(void* thiz, void* netCacheOne, void* method);
+using BattleInDropEquipByServerFn = bool (*)(void* thiz, void* method);
+using BattleInDropEquipDataByTransIdFn = void* (*)(void* thiz, uint32_t transid, void* method);
+using CheckDropEquipsByServerFn = void (*)(void* thiz, void* drops, void* method);
+
+static CheckGameOverCheatFn g_orig_check_gameover_cheat = nullptr;
+static BattleInDropEquipByServerFn g_orig_battlein_drop_equip_by_server = nullptr;
+static BattleInDropEquipDataByTransIdFn g_orig_battlein_drop_equip_data_by_transid = nullptr;
+static CheckDropEquipsByServerFn g_orig_check_drop_equips_by_server = nullptr;
+
+static void* hk_validate_build_cheat_data(void* thiz, void* method) {
+    bump(g_hit_validate_build_cheat);
+    if (!g_orig_build_cheat_data) return nullptr;
+    return g_orig_build_cheat_data(thiz, method);
+}
+
+// Reads a UTF-16 IL2CPP managed string into `out` (UTF-8, best-effort).
+// Only emits the ASCII subset directly; non-ASCII chars are escaped as
+// `?` so the dump file stays text-safe. Returns the number of source chars
+// consumed (clamped to a maximum so we don't spew megabytes for huge
+// payload strings).
+static int netcacheone_format_string(void* managed_string, char* out, size_t out_size) {
+    if (!managed_string || !out || out_size == 0) return 0;
+    out[0] = '\0';
+    if (!g_il2cpp_api.string_chars || !g_il2cpp_api.string_length) return 0;
+    int32_t len = g_il2cpp_api.string_length(managed_string);
+    if (len < 0) len = 0;
+    if (len > 512) len = 512;
+    uint16_t* chars = reinterpret_cast<uint16_t*>(g_il2cpp_api.string_chars(managed_string));
+    if (!chars) return 0;
+    size_t w = 0;
+    for (int i = 0; i < len && w + 2 < out_size; ++i) {
+        uint16_t c = chars[i];
+        if (c >= 0x20 && c < 0x7F && c != '"' && c != '\\') {
+            out[w++] = static_cast<char>(c);
+        } else {
+            out[w++] = '?';
+        }
+    }
+    out[w] = '\0';
+    return len;
+}
+
+static void netcacheone_dump_value(FILE* f, const char* indent, void* base_obj,
+                                   void* field, uint32_t depth, uint32_t max_depth);
+
+static void netcacheone_dump_object(FILE* f, const char* indent, void* obj,
+                                    uint32_t depth, uint32_t max_depth) {
+    if (!f || !obj) return;
+    if (!g_il2cpp_api.object_get_class || !g_il2cpp_api.class_get_fields ||
+        !g_il2cpp_api.field_get_name || !g_il2cpp_api.field_get_type ||
+        !g_il2cpp_api.field_get_offset || !g_il2cpp_api.type_get_name) {
+        fprintf(f, "%s(missing il2cpp api: object_get_class/class_get_fields/...)\n", indent);
+        return;
+    }
+    void* klass = g_il2cpp_api.object_get_class(obj);
+    if (!klass) {
+        fprintf(f, "%s(no klass)\n", indent);
+        return;
+    }
+    char klass_chain[192] = "";
+    build_class_name_chain(klass, klass_chain, sizeof(klass_chain));
+    fprintf(f, "%sclass=%s obj=%p\n", indent, klass_chain[0] ? klass_chain : "?", obj);
+
+    void* iter = nullptr;
+    void* field = nullptr;
+    int field_count = 0;
+    char child_indent[64];
+    snprintf(child_indent, sizeof(child_indent), "%s  ", indent);
+    while ((field = g_il2cpp_api.class_get_fields(klass, &iter)) != nullptr) {
+        netcacheone_dump_value(f, child_indent, obj, field, depth, max_depth);
+        if (++field_count >= 96) {
+            fprintf(f, "%s... truncated at 96 fields\n", child_indent);
+            break;
+        }
+    }
+}
+
+static void netcacheone_dump_value(FILE* f, const char* indent, void* base_obj,
+                                   void* field, uint32_t depth, uint32_t max_depth) {
+    const char* name = g_il2cpp_api.field_get_name(field);
+    void* ftype = g_il2cpp_api.field_get_type(field);
+    char* tname_raw = ftype && g_il2cpp_api.type_get_name ? g_il2cpp_api.type_get_name(ftype) : nullptr;
+    const char* tname = tname_raw ? tname_raw : "?";
+    size_t offset = g_il2cpp_api.field_get_offset(field);
+    uint8_t* base = reinterpret_cast<uint8_t*>(base_obj);
+    if (!name) name = "?";
+
+    // Type-based readback. The il2cpp_type_get_name strings used here are the
+    // standard .NET full names exposed by libil2cpp's type_get_name.
+    if (strcmp(tname, "System.Boolean") == 0) {
+        bool v = *reinterpret_cast<bool*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %s\n", indent, name, tname, offset, v ? "true" : "false");
+    } else if (strcmp(tname, "System.Byte") == 0) {
+        uint8_t v = *reinterpret_cast<uint8_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, static_cast<unsigned>(v));
+    } else if (strcmp(tname, "System.SByte") == 0) {
+        int8_t v = *reinterpret_cast<int8_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, static_cast<int>(v));
+    } else if (strcmp(tname, "System.Int16") == 0) {
+        int16_t v = *reinterpret_cast<int16_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, static_cast<int>(v));
+    } else if (strcmp(tname, "System.UInt16") == 0 || strcmp(tname, "System.Char") == 0) {
+        uint16_t v = *reinterpret_cast<uint16_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, static_cast<unsigned>(v));
+    } else if (strcmp(tname, "System.Int32") == 0) {
+        int32_t v = *reinterpret_cast<int32_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %d\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.UInt32") == 0) {
+        uint32_t v = *reinterpret_cast<uint32_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %u\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.Int64") == 0) {
+        int64_t v = *reinterpret_cast<int64_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %lld\n", indent, name, tname, offset, static_cast<long long>(v));
+    } else if (strcmp(tname, "System.UInt64") == 0) {
+        uint64_t v = *reinterpret_cast<uint64_t*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %llu\n", indent, name, tname, offset, static_cast<unsigned long long>(v));
+    } else if (strcmp(tname, "System.Single") == 0) {
+        float v = *reinterpret_cast<float*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %f\n", indent, name, tname, offset, static_cast<double>(v));
+    } else if (strcmp(tname, "System.Double") == 0) {
+        double v = *reinterpret_cast<double*>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %f\n", indent, name, tname, offset, v);
+    } else if (strcmp(tname, "System.String") == 0) {
+        void* s = *reinterpret_cast<void**>(base + offset);
+        if (!s) {
+            fprintf(f, "%s%s : System.String @0x%zx = null\n", indent, name, offset);
+        } else {
+            char buf[576] = "";
+            int len = netcacheone_format_string(s, buf, sizeof(buf));
+            fprintf(f, "%s%s : System.String @0x%zx (len=%d) = \"%s\"\n", indent, name, offset, len, buf);
+        }
+    } else {
+        // Reference type or composite. Print the pointer and (optionally)
+        // recurse one more level. The il2cpp metadata gives us no easy way to
+        // distinguish value-types from reference-types here without more API
+        // surface, so we only recurse when the slot looks like a managed
+        // pointer (non-null, plausibly heap-aligned, klass header present).
+        void* slot = *reinterpret_cast<void**>(base + offset);
+        fprintf(f, "%s%s : %s @0x%zx = %p\n", indent, name, tname, offset, slot);
+        if (slot && depth + 1 < max_depth && g_il2cpp_api.object_get_class &&
+            g_il2cpp_api.object_get_class(slot) != nullptr) {
+            char child_indent[64];
+            snprintf(child_indent, sizeof(child_indent), "%s  ", indent);
+            netcacheone_dump_object(f, child_indent, slot, depth + 1, max_depth);
+        }
+    }
+
+    if (tname_raw && g_il2cpp_api.free) {
+        g_il2cpp_api.free(tname_raw);
+    }
+}
+
+static void dump_netcacheone_to_file(void* http_client, void* netCacheOne) {
+    if (!netCacheOne) return;
+    const char* primary = "/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_netcacheone.txt";
+    const char* fallback = "/data/data/com.habby.archero/files/archero_mod_netcacheone.txt";
+    FILE* f = fopen(primary, "w");
+    if (!f) f = fopen(fallback, "w");
+    if (!f) return;
+
+    fprintf(f, "version=archero_mod_netcacheone_v1\n");
+    fprintf(f, "http_client=%p\n", http_client);
+    fprintf(f, "netcacheone=%p\n", netCacheOne);
+    fprintf(f, "dump_max_depth=%u\n", static_cast<unsigned>(g_netcacheone_dump_max_depth));
+    fprintf(f, "fields:\n");
+    uint32_t depth_cap = g_netcacheone_dump_max_depth;
+    if (depth_cap < 1) depth_cap = 1;
+    netcacheone_dump_object(f, "  ", netCacheOne, 0, depth_cap);
+    fclose(f);
+    bump(g_hit_netcacheone_dump);
+}
+
+static void hk_validate_check_gameover_cheat(void* thiz, void* netCacheOne, void* method) {
+    bump(g_hit_validate_check_gameover_cheat);
+
+    // Optional: dump the live NetCacheOne field layout + values to a
+    // sibling text file before the original call modifies it. Pure read.
+    if (g_force_server_validation && g_dump_netcacheone && netCacheOne) {
+        dump_netcacheone_to_file(thiz, netCacheOne);
+    }
+
+    // Natural call. Pass-through; no return value, no modifications.
+    if (g_orig_check_gameover_cheat) {
+        g_orig_check_gameover_cheat(thiz, netCacheOne, method);
+    }
+
+    // Optional: immediately replay the same call with the same arguments so
+    // the server-side validators see two identical CheckGameOverCheat packets
+    // back-to-back. The transid embedded in NetCacheOne is the real one the
+    // game just produced — we never fabricate it. Useful for confirming the
+    // server's idempotency / replay-rejection behavior on legitimate runs.
+    if (g_force_server_validation && g_replay_netcacheone && g_orig_check_gameover_cheat && netCacheOne) {
+        g_orig_check_gameover_cheat(thiz, netCacheOne, method);
+        bump(g_hit_netcacheone_replay);
+    } else if (g_force_server_validation && g_replay_netcacheone) {
+        bump(g_hit_netcacheone_replay_skipped);
+    }
+}
+
+static bool hk_validate_battlein_drop_equip_by_server(void* thiz, void* method) {
+    bump(g_hit_validate_drop_equip_by_server);
+    if (!g_orig_battlein_drop_equip_by_server) return false;
+    return g_orig_battlein_drop_equip_by_server(thiz, method);
+}
+
+static void* hk_validate_battlein_drop_equip_data_by_transid(void* thiz, uint32_t transid, void* method) {
+    bump(g_hit_validate_drop_equip_data_by_transid);
+    if (!g_orig_battlein_drop_equip_data_by_transid) return nullptr;
+    return g_orig_battlein_drop_equip_data_by_transid(thiz, transid, method);
+}
+
+static void hk_validate_check_drop_equips_by_server(void* thiz, void* drops, void* method) {
+    bump(g_hit_validate_check_drop_equips_by_server);
+    if (g_orig_check_drop_equips_by_server) {
+        g_orig_check_drop_equips_by_server(thiz, drops, method);
+    }
+}
+
+static void install_force_server_validation_hooks_once(uintptr_t base) {
+    if (!base || g_force_server_validation_installed) return;
+    g_force_server_validation_installed = true;
+    g_hooked_validate_build_cheat_data = HOOK_FN(base, rva::BattleModuleData_BuildCheatData,
+                                                 hk_validate_build_cheat_data, g_orig_build_cheat_data);
+    g_hooked_validate_check_gameover_cheat = HOOK_FN(base, rva::HTTPSendClient_CheckGameOverCheat,
+                                                     hk_validate_check_gameover_cheat, g_orig_check_gameover_cheat);
+    g_hooked_validate_drop_equip_by_server = HOOK_FN(base, rva::LocalSave_BattleIn_DropEquipByServer,
+                                                     hk_validate_battlein_drop_equip_by_server,
+                                                     g_orig_battlein_drop_equip_by_server);
+    g_hooked_validate_drop_equip_data_by_transid = HOOK_FN(base, rva::LocalSave_BattleIn_DropEquipDataByTransId,
+                                                           hk_validate_battlein_drop_equip_data_by_transid,
+                                                           g_orig_battlein_drop_equip_data_by_transid);
+    g_hooked_validate_check_drop_equips_by_server = HOOK_FN(base, rva::GameOverModeCtrlBase_CheckDropEquipsByServer,
+                                                            hk_validate_check_drop_equips_by_server,
+                                                            g_orig_check_drop_equips_by_server);
+
+    // Hook BattleModuleData.AddGold so we can capture the live
+    // BattleModuleData* during the run, and LocalSave.BattleIn_UpdateGold so
+    // we can call BuildCheatData on that pointer at settlement time. Each
+    // target is hooked exactly once across install_gold_hooks_once() and
+    // install_force_server_validation_hooks_once() via the per-function
+    // guards below.
+    if (!g_hooked_add_gold_float) {
+        if (HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float)) {
+            g_hooked_add_gold_float = true;
+        }
+    }
+    if (!g_hooked_add_gold_int) {
+        if (HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int)) {
+            g_hooked_add_gold_int = true;
+        }
+    }
+    if (!g_hooked_battlein_update_gold) {
+        if (HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold)) {
+            g_hooked_battlein_update_gold = true;
+        }
+    }
+    LOGD("Force server-validation hooks installed");
+}
+
 static void install_gold_hooks_once(uintptr_t base) {
     if (!base || g_gold_hooks_installed) return;
     g_gold_hooks_installed = true;
 
     if (g_gold_add_scale) {
-        HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float);
-        HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int);
+        if (!g_hooked_add_gold_float) {
+            if (HOOK_FN(base, rva::BattleModuleData_AddGold_Float, hk_add_gold_float, g_orig_add_gold_float)) {
+                g_hooked_add_gold_float = true;
+            }
+        }
+        if (!g_hooked_add_gold_int) {
+            if (HOOK_FN(base, rva::BattleModuleData_AddGold_Int, hk_add_gold_int, g_orig_add_gold_int)) {
+                g_hooked_add_gold_int = true;
+            }
+        }
     }
     if (g_gold_get_fixed || g_gold_get_scale) {
         HOOK_FN(base, rva::BattleModuleData_GetGold, hk_battle_get_gold, g_orig_battle_get_gold);
         HOOK_FN(base, rva::LocalSave_BattleIn_GetGold, hk_battlein_get_gold, g_orig_battlein_get_gold);
     }
     if (g_gold_update_fixed || g_gold_update_scale) {
-        HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold);
+        if (!g_hooked_battlein_update_gold) {
+            if (HOOK_FN(base, rva::LocalSave_BattleIn_UpdateGold, hk_battlein_update_gold, g_orig_battlein_update_gold)) {
+                g_hooked_battlein_update_gold = true;
+            }
+        }
     }
     if (g_gold_formula_scale) {
         HOOK_FN(base, rva::EntityData_getGold, hk_entity_get_gold, g_orig_entity_get_gold);
@@ -3996,6 +4411,9 @@ static void* hack_thread(void*) {
 
     if (g_install_gold_hooks) {
         install_gold_hooks_once(il2cpp_base);
+    }
+    if (g_force_server_validation) {
+        install_force_server_validation_hooks_once(il2cpp_base);
     }
     update_tiny_direct_patches(il2cpp_base);
 
