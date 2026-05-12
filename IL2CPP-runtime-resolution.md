@@ -19,7 +19,7 @@ Use this stack, in this order:
 4. Legacy RVA only as the last compatibility fallback.
 5. Runtime dumpers as operator fallback for protected updates, not as the normal launch path.
 
-This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, and direct-patch counters. There is no Lua loader or Lua file in this flow.
+This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, `field_resolver.metadata`, `field_resolver.fallback`, `field_resolver.fail`, `field_offsets_ready`, and direct-patch counters. There is no Lua loader or Lua file in this flow.
 
 ## Technique Survey
 
@@ -91,11 +91,14 @@ The default startup set is metadata-first and falls back to AOB/xref/RVA only if
 - `TableTool.PlayerCharacter_UpgradeModel.GetATKBase`: high damage value.
 - `TableTool.PlayerCharacter_UpgradeModel.GetHPMaxBase`: high HP value.
 - `TableTool.Weapon_weapon.get_Speed` and `get_AttackSpeed`: high attack speed value `100.0`.
-- `TableTool.Weapon_weapon.get_bThroughWall`: projectile shoot-through-wall behavior.
+- `TableTool.Weapon_weapon.get_bThroughWall` and `get_bThroughInsideWall`: projectile shoot-through-wall getters; while enabled, the hook also writes the private `bThroughWallp` and `bThroughInsideWallp` fields on the weapon data object.
+- `BulletTransmit.Init(...)` overloads and `BulletTransmit.get_ThroughWall`: hero bullet setup forces `BulletTransmit.<ThroughWall>k__BackingField` and the weapon-data through-wall fields when the bullet owner is the hero.
+- `BulletBase.HitWall(Collider)` and `BulletBase.<TriggerEnter1>g__HitWallInternal|337_0`: hero bullet wall-collision/despawn handlers return early after refreshing through-wall state; non-hero bullets still call the original methods.
 - `EntityBase.AddInitSkills`: after the hero's initial battle skills are created, injects always-on battle skills by resolving and calling `EntityBase.AddSkill(int)`: water walk `2080`, Greed `1000040`, and Smart `1000041`. The module also resolves `EntityBase.ContainsSkill(int)` so status output can confirm whether each injected ID is present on the hero.
 - Smart should normally show in the acquired-skills UI because it is a regular visible slot skill (`Skill_Smart_Rate = "SlotSkill_1000041%"`). Greed is runtime-confirmed as accepted (`ContainsSkill(1000040)=true`) and backed by `TableTool.Skill_greedyskill`, but that separate table path can keep it out of the regular acquired-skills display.
 - `EntityBase.SetFlyWater`, `EntityBase.GetFlyWater`, `EntityBase.SetFlyStone`, `EntityBase.SetFlyAll`, `EntityBase.get_OnCalCanMove`, `EntityBase.SetCollider`, `EntityBase.check_pos`, and `EntityHitCtrl.SetFlyOne`: force only the hero's traversal state while preserving map generation.
 - Direct hero state mirroring: sets `EntityBase.bFlyWater`, `EntityBase.bFlyStone`, `EntityBase.move_layermask`, and the valid `EntityBase.m_EntityData` fly counters (`mFlyWaterCount`, `mFlyStoneCount`) after resolving the hero instance. The module does not hook `EntityData.IsFlyWater` or `EntityData.IsFlyStone`; direct getter hooks were rejected after crash triage.
+- `MoveControl.UpdateProgress`: config-gated hero-only movement scaling by running extra original movement substeps against a temporarily scaled `MoveControl.MoveDirection`, then restoring the original `ObscuredVector3` value.
 - `UnityEngine.Time.get_timeScale` and `set_timeScale`: forced game speed, default multiplier `4.0`.
 
 The resolver is intentionally not used to force game-over server validation. The static dump shows transaction IDs, server-drop structures, cached game-over packets, and client-side cheat reporting around settlement. For an owned backend, update the server-side settlement rules to accept the desired skill/reward policy instead of adding client-side packet-forcing behavior.
@@ -109,13 +112,16 @@ Verified on the connected Android device after installing the rebuilt debug APK 
 - `il2cpp_metadata_ready=1`, `startup_hooks_ready=1`, `il2cpp_metadata_wait_ms=2000`.
 - First traversal implementation used `MapCreator.DealWater`, `MapCreator.DealTrap`, and `MapCreator.CreateGoodNotTrap`; that was rejected because it removed walls/water and also suppressed stage objects such as angels and item shops.
 - Current traversal implementation no longer hooks `MapCreator` at all.
-- `hook_installed_count=18`.
-- `resolver.metadata=20`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call helpers `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)`, which are called for battle-skill injection/confirmation instead of being hooked.
-- Status confirmed all 18 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, and the Unity timeScale hooks.
+- `hook_installed_count=25`.
+- `resolver.metadata=27`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call helpers `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)`, which are called for battle-skill injection/confirmation instead of being hooked.
+- `field_resolver.metadata=25`, `field_resolver.fallback=0`, `field_resolver.fail=0`, `field_offsets_ready=1`.
+- Status confirmed all 25 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, the movement hook, the shoot-through-wall stack, and the Unity timeScale hooks.
 - Final speed defaults were device-confirmed: `attack_speed_value=100.000000` and `game_speed_multiplier=4.000000`.
+- Hero movement speed was device-confirmed through `MoveControl.UpdateProgress` status counters with the test config set to `move_speed_multiplier=10`.
+- Shoot-through-wall was device-confirmed on the live bullet collision path: `hits.weapon_wall_field_apply=1873`, `hits.runtime_walls_apply=65`, `hits.runtime_walls_init=1582`, and `hits.bullet_hitwall_internal_bypass=65`. `hits.bullet_transmit_wall_get=0` and `hits.bullet_hitwall_bypass=0` simply mean the live run used the internal `TriggerEnter1` wall handler rather than those backup paths.
 - After battle entry on the Greed/Smart rebuilt APK, status showed `hits.skill_inject_greed=1`, `hits.skill_confirm_greed=1`, `hits.skill_inject_smart=1`, and `hits.skill_confirm_smart=1`, confirming both IDs were accepted by `EntityBase.ContainsSkill(int)` in the running game. `hits.skill_confirm_fail=0`.
 - The water skill-list confirmation remained false (`hits.skill_confirm_water=0`), but the traversal path remained active through the previously validated direct state path: `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`.
-- After battle entry and letting the battle continue, the process remained alive as pid `10896`; after clearing logcat and watching another 10 seconds, filtered logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`.
+- After battle entry and letting the battle continue, the process remained alive as pid `7850`; after clearing logcat and watching another 10 seconds, filtered logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`.
 - Config polling stayed cheap during the unchanged-config run: `config_loads=1` while `status_writes` continued advancing.
 
 ## Sources

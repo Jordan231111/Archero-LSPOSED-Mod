@@ -9,9 +9,10 @@ LSPosed/Xposed module for Archero (com.habby.archero) providing native IL2CPP ga
 - **Headshot:** Enemies are one-shotted (forced headshot on non-Hero entities)
 - **Godmode:** Player is invincible (forced miss on Hero entities)
 - **Always-on battle skill injection:** Water walk, Greed, and Smart are injected through metadata-resolved `EntityBase.AddSkill(int)` at battle init and confirmed with `EntityBase.ContainsSkill(int)` where the game tracks that skill ID family.
-- **Speed defaults:** Attack speed is forced to `100.0`; game speed defaults to `4.0x`.
+- **Shoot through walls:** Hero projectile setup forces weapon through-wall fields and `BulletTransmit.ThroughWall`; hero bullet wall-collision handlers are bypassed so walls do not despawn the projectile.
+- **Speed defaults:** Attack speed is forced to `100.0`; game speed defaults to `4.0x`; hero movement speed is configurable through `MoveControl.UpdateProgress` substeps.
 - **Traversal:** Hero-only water/wall traversal state is mirrored without hooking map generation, preserving walls, water, shops, and angels.
-- **Runtime resolution:** Hooks resolve by IL2CPP metadata first, then fall back to AOB/xref/RVA where available.
+- **Runtime resolution:** Methods and field offsets resolve by IL2CPP metadata first, then fall back to AOB/xref/RVA or validated offset constants where available.
 
 Side-aware logic matches the original mod behavior: only the appropriate side receives the forced result.
 
@@ -48,11 +49,12 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk | grep libarchero_mod
 
 ## Documentation
 
-See [IL2CPP-runtime-resolution.md](IL2CPP-runtime-resolution.md) and [Archero-7.9.1-hook-gold-report.md](Archero-7.9.1-hook-gold-report.md) for:
+See [IL2CPP-runtime-resolution.md](IL2CPP-runtime-resolution.md), [Archero-7.9.1-hook-gold-report.md](Archero-7.9.1-hook-gold-report.md), and [LSPATCH-NONROOT-BUILD.md](LSPATCH-NONROOT-BUILD.md) for:
 
 - Hook addresses and side-aware logic
 - How to update for future game versions
 - Packaging requirements (avoid UnsatisfiedLinkError)
+- Non-root LSPatch split APK packaging and update-safe signing
 - Verification commands
 
 ## License

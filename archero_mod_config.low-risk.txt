@@ -43,7 +43,7 @@ health=1
 attack_speed=1
 
 # shoot_through_walls
-# Forces Weapon_weapon.get_bThroughWall true.
+# Forces hero projectile through-wall state at the weapon, BulletTransmit, and BulletBase wall-collision layers.
 # This replaces the old external Shoot --Walls--> startup patch.
 shoot_through_walls=1
 
@@ -85,6 +85,17 @@ game_speed=1
 # Example normal speed: game_speed=0 or game_speed_multiplier=1
 # Example default: game_speed_multiplier=4
 game_speed_multiplier=4
+
+# move_speed
+# Config-gated hero-only movement scaling through MoveControl.UpdateProgress.
+# 1 applies extra hero movement substeps. 0 passes movement through unchanged.
+move_speed=1
+
+# move_speed_multiplier
+# Hero-only movement multiplier when move_speed=1.
+# Range in native: 0.1 to 20. Default is 1.
+# Example: move_speed_multiplier=3
+move_speed_multiplier=1
 
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
