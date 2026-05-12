@@ -34,7 +34,7 @@ Former Lua startup targets were all unvalidated by the hook report. The Lua file
 |---:|---|---:|---|---|
 | 1 | `PlayerCharacter_UpgradeModel.GetATKBase` | `0x5904E60` | `int32_t(..., int32_t charid, MethodInfo*)` | Unvalidated, but return-int patch is type-compatible. |
 | 2 | `PlayerCharacter_UpgradeModel.GetHPMaxBase` | `0x5905134` | `int32_t(..., int32_t charid, MethodInfo*)` | Unvalidated, type-compatible. |
-| 3 | `Weapon_weapon.get_bThroughWall` | `0x58E2290` | `bool(..., MethodInfo*)` | Native startup hook forces true while `shoot_through_walls=1`. |
+| 3 | `Weapon_weapon.get_bThroughWall` | `0x58E2290` | `bool(..., MethodInfo*)` | Native startup hook still forces this getter, but it is only one layer of the current shoot-through-wall stack. The live wall bypass also hooks weapon fields, `BulletTransmit`, and `BulletBase` wall collision. |
 | 4 | `MapCreator.CreateGoodNotTrap` | `0x5C53C84` | `GameObject*(..., int,int,int,object[],MethodInfo*)` | Rejected for current native module. Returning null removes too many stage objects, including angels and item shops. |
 | 5 | `MapCreator.DealWater` | `0x5C5260C` | `void(..., MethodInfo*)` | Rejected for current native module. Early return removes water generation globally instead of only changing player traversal. |
 | 6 | `MapCreator.DealTrap` | `0x5C52030` | `void(..., MethodInfo*)` | Rejected for current native module. Early return is map-generation side, not player traversal side. |
@@ -114,7 +114,32 @@ There is no Lua loader in the current flow. The module creates and reloads only 
 
 `/storage/emulated/0/Android/data/com.habby.archero/files/archero_mod_config.txt`
 
-The default always-on gameplay profile enables headshot, godmode, high damage, high HP, attack speed value `100.0`, projectile shoot-through-wall, walk-through-water, walk-through-walls, Greed skill injection, Smart skill injection, and game speed multiplier `4.0`. Optional gold/drop hooks remain off unless explicitly enabled in config.
+The default always-on gameplay profile enables headshot, godmode, high damage, high HP, attack speed value `100.0`, projectile shoot-through-wall, walk-through-water, walk-through-walls, Greed skill injection, Smart skill injection, game speed multiplier `4.0`, and config-gated hero movement speed scaling. Optional gold/drop hooks remain off unless explicitly enabled in config.
+
+Current shoot-through-wall targets:
+
+| Feature | Native target | RVA | Behavior |
+|---|---|---:|---|
+| Weapon through-wall getter | `TableTool.Weapon_weapon.get_bThroughWall()` | `0x58E2290` | Returns true while `shoot_through_walls=1` and writes the cached weapon through-wall fields. |
+| Weapon inside-wall getter | `TableTool.Weapon_weapon.get_bThroughInsideWall()` | `0x58E22D8` | Returns true while `shoot_through_walls=1` and writes the cached weapon through-wall fields. |
+| Bullet setup | `BulletTransmit.Init(EntityBase,int,bool,float)` | `0x33402BC` | After the original init, hero-owned bullets get `ThroughWall=true` and weapon data is forced through-wall. |
+| Bullet setup | `BulletTransmit.Init(EntityBase,int,float,float,int,float,bool,float)` | `0x3340890` | Same as the simple init overload for the longer bullet setup path. |
+| Bullet getter | `BulletTransmit.get_ThroughWall()` | `0x3341BB4` | Backup path that returns true and writes the backing field while enabled. |
+| Bullet wall collision | `BulletBase.HitWall(Collider)` | `0x5FEF35C` | For hero bullets, refreshes through-wall state and skips the original wall-hit/despawn logic. Non-hero bullets call the original method. |
+| Bullet wall collision | `BulletBase.<TriggerEnter1>g__HitWallInternal|337_0(...)` | `0x5FF35E8` | The live-tested wall handler. For hero bullets, refreshes through-wall state and skips the original wall-hit/despawn logic. |
+
+Current shoot-through-wall field offsets:
+
+| Owner | Offset | Metadata field | Behavior |
+|---|---:|---|---|
+| `TableTool.Weapon_weapon` | `0x346` | `bThroughWallp` | Forced true on weapon data while shoot-through-wall is enabled. |
+| `TableTool.Weapon_weapon` | `0x348` | `bThroughInsideWallp` | Forced true on weapon data while shoot-through-wall is enabled. |
+| `BulletTransmit` | `0x50` | `m_Entity` | Used to confirm the bullet owner is the hero. |
+| `BulletTransmit` | `0x58` | `weapondata` | Used to reach and force the associated weapon data. |
+| `BulletTransmit` | `0xC8` | `<ThroughWall>k__BackingField` | Forced true on hero-owned bullet transmit objects. |
+| `BulletBase` | `0x88` | `<m_Entity>k__BackingField` | Used to confirm the bullet owner is the hero. |
+| `BulletBase` | `0xA0` | `m_Data` | Used to reach and force the associated weapon data. |
+| `BulletBase` | `0xA8` | `mBulletTransmit` | Used to reach and force the associated bullet transmit object. |
 
 Current traversal targets:
 
@@ -145,6 +170,24 @@ Direct field/counter mirrors used by the traversal runtime:
 
 These are traversal-state hooks, not map-generation hooks. They preserve water, walls, angels, shops, and other room objects.
 
+Current movement-speed target:
+
+| Feature | Native target | RVA | Behavior |
+|---|---|---:|---|
+| Hero movement speed | `MoveControl.UpdateProgress()` | `0x5538124` | For hero move controls only, reads `MoveControl.MoveDirection` as an `ObscuredVector3`, runs extra original movement substeps based on `move_speed_multiplier`, then restores the original direction value. Non-hero movement and disabled/`1.0x` configs pass through unchanged. |
+
+Movement-speed field offsets:
+
+| Owner | Offset | Metadata field | Behavior |
+|---|---:|---|---|
+| `MoveControl` | `0x10` | `m_Entity` | Used to confirm the move controller belongs to the hero. |
+| `MoveControl` | `0x70` | `MoveDirection` | Temporarily scaled during `UpdateProgress` substeps. |
+| `CodeStage.AntiCheat.ObscuredTypes.ObscuredVector3` | `0x0` | `currentCryptoKey` | Used to decrypt/re-encrypt the hidden vector. |
+| `CodeStage.AntiCheat.ObscuredTypes.ObscuredVector3` | `0x4` | `hiddenValue` | Encrypted `Vector3` payload. |
+| `CodeStage.AntiCheat.ObscuredTypes.ObscuredVector3` | `0x10` | `inited` | Preserved when restoring the original direction. |
+| `CodeStage.AntiCheat.ObscuredTypes.ObscuredVector3` | `0x14` | `fakeValue` | Preserved/restored for anti-cheat shadow value consistency. |
+| `CodeStage.AntiCheat.ObscuredTypes.ObscuredVector3` | `0x20` | `fakeValueActive` | Controls whether the fake value is updated during temporary scaling. |
+
 ## D. Why The Implementations Work
 
 Native hooks use `A64HookFunction` on `libil2cpp.so + RVA`. The replacement receives the IL2CPP ABI arguments directly. It can call the original trampoline, scale arguments or returns, and return normally.
@@ -174,34 +217,43 @@ That is only used for primitive return methods. It is intentionally not used for
 3. Confirm status after launch:
    - `il2cpp_metadata_ready=1`
    - `startup_hooks_ready=1`
-   - `hook_installed_count=18`
-   - `resolver.metadata=20`
+   - `hook_installed_count=25`
+   - `resolver.metadata=27`
    - `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`
+   - `field_resolver.metadata=25`, `field_resolver.fallback=0`, `field_resolver.fail=0`
+   - `field_offsets_ready=1`
+   - `shoot_through_walls=1`
    - `walk_through_water=1`, `walk_through_walls=1`
    - `inject_greed_skill=1`, `inject_smart_skill=1`
 4. Confirm the process stays alive after hook installation with `adb shell pidof com.habby.archero`.
 5. For optional gold/drop hooks, edit the app-owned config and verify `config_loads` increments only after the file changes. The module stats the file every two seconds but skips reparsing unchanged content.
-6. In gameplay, verify water and obstacle behavior manually in a map containing those tiles. Status counters `hits.walk_water` and `hits.walk_wall` increment only when the relevant hero fly-water/fly-stone paths are exercised.
+6. In gameplay, verify shoot-through-wall on an actual wall. The strongest current status signal is `hits.bullet_hitwall_internal_bypass` increasing, with `hits.weapon_wall_field_apply` and `hits.runtime_walls_init` also nonzero. `hits.bullet_transmit_wall_get` may stay zero if the live path never calls that getter.
+7. In gameplay, verify water and obstacle behavior manually in a map containing those tiles. Status counters `hits.walk_water` and `hits.walk_wall` increment only when the relevant hero fly-water/fly-stone paths are exercised.
+8. For movement speed, set `move_speed=1` and a visible test value such as `move_speed_multiplier=10`, then verify `hits.move_progress_hero`, `hits.move_progress_apply`, and `hits.move_progress_substeps` increase while moving the hero.
 
 ## F. Latest Device Verification
 
-After rebuilding and installing the Greed/Smart/speed-default debug APK on the connected device:
+After rebuilding and installing the shoot-through-wall/movement debug APK on the connected device:
 
 - Launch activity: `com.habby.archero/.UnityPlayerActivity`.
-- Process stayed alive: `pidof com.habby.archero` returned `10896` after startup, battle entry, and status/log checks.
+- Process stayed alive: `pidof com.habby.archero` returned `7850` after startup, battle entry, and status/log checks.
 - Status showed `il2cpp_metadata_ready=1`, `startup_hooks_ready=1`, and `il2cpp_metadata_wait_ms=2000`.
-- Current build installs 18 startup hooks through metadata: `hook_installed_count=18`, `resolver.metadata=20`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)` helpers.
+- Current build installs 25 startup hooks through metadata: `hook_installed_count=25`, `resolver.metadata=27`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)` helpers.
+- Runtime field offsets also resolved through metadata: `field_resolver.metadata=25`, `field_resolver.fallback=0`, `field_resolver.fail=0`, and `field_offsets_ready=1`.
 - Defaults were active with `walk_through_water=1`, `walk_through_walls=1`, `inject_greed_skill=1`, and `inject_smart_skill=1`.
 - Speed defaults were active with `attack_speed_value=100.000000` and `game_speed_multiplier=4.000000`.
+- The device test config set `move_speed=1` and `move_speed_multiplier=10`; the stable movement hook path is `MoveControl.UpdateProgress`, and the earlier backup movement experiments were removed from the active module.
+- Shoot-through-wall was confirmed on the live bullet-wall path with `hits.always_walls=161`, `hits.runtime_walls_apply=65`, `hits.runtime_walls_init=1582`, `hits.weapon_wall_field_apply=1873`, and `hits.bullet_hitwall_internal_bypass=65`.
 - Battle-init logs showed `Battle skill greed id=1000040 ... confirmed=1` and `Battle skill smart id=1000041 ... confirmed=1`.
 - Final status showed `hits.skill_inject_greed=1`, `hits.skill_confirm_greed=1`, `hits.skill_inject_smart=1`, `hits.skill_confirm_smart=1`, `hits.skill_inject_fail=0`, `hits.skill_confirm_fail=0`, and `hits.skill_confirm_unavailable=0`.
 - Water traversal still runs through the direct traversal path: `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`. `hits.skill_confirm_water=0` because `ContainsSkill(2080)` does not report that lower-ID traversal ability in the same slot-skill list used by Greed/Smart.
 - After clearing logcat and watching another 10 seconds, filtered crash logcat showed no `FATAL EXCEPTION`, native fatal signal, or tombstone for `com.habby.archero`. The process remained alive.
 - The earlier `MapCreator` traversal implementation was removed because it suppressed room objects. Current traversal does not hook `MapCreator`, so room objects such as water, walls, angels, and item shops remain generated by the game.
+- Latest non-root LSPatch split archive: `/Users/jordan/Documents/temp/archerodecompiled/dist/lspatch_archero_7.9.1_xapk/archero_7.9.1_lspatched_full.apks`, SHA-256 `7734f2001607b50baec30385ccd97a625736a7ea783818b126d2dad9de0f77c9`.
 
 ## Validation Gaps
 
-- `GetHeadShot`, `GetMiss`, side-detection fields, startup hook installation, Greed/Smart skill acceptance, and traversal runtime counters were device-validated from logs/status.
+- `GetHeadShot`, `GetMiss`, side-detection fields, startup hook installation, Greed/Smart skill acceptance, traversal runtime counters, movement hook counters, and the live `BulletBase` wall-collision bypass were device-validated from logs/status.
 - Manual user validation is still useful on a map with water tiles because the current room only validated battle-start water-skill injection, fly-counter writes, and obstacle/movement `check_pos` traversal. The native status confirms those paths are active.
 - All gold/material RVAs are v7.9.1 dump-derived and should be promoted into the hook report after live validation.
 - Direct profile gold setters (`LocalSave.Set_Gold`, `LocalSave.Modify_Gold`, `LocalSave.UserInfo_SetGold`) were not enabled because they affect lobby/account gold, not just in-stage gold.

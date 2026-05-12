@@ -3,6 +3,7 @@
 **/bin/
 **/.gradle/
 **/.cxx/
+dist/
 
 # Extracted game libs (do not commit)
 lib/
@@ -20,7 +21,15 @@ LSPosed_*/
 
 # APKs and large binaries
 *.apk
+*.apks
+*.xapk
+*.idsig
 *.aab
+
+# Local signing material
+*.jks
+*.keystore
+private-signing/
 
 # Il2CppDumper / diffwork output (regenerate per version)
 diffwork/

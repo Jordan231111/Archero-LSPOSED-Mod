@@ -31,6 +31,12 @@ static constexpr uintptr_t EntityData_GetMiss = 0x4F6D280;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_Speed = 0x58E0F80;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_AttackSpeed = 0x58E0FB4;
 static constexpr uintptr_t TableTool_Weapon_weapon_get_bThroughWall = 0x58E2290;
+static constexpr uintptr_t TableTool_Weapon_weapon_get_bThroughInsideWall = 0x58E22D8;
+static constexpr uintptr_t BulletTransmit_Init_Simple = 0x33402BC;
+static constexpr uintptr_t BulletTransmit_Init_Full = 0x3340890;
+static constexpr uintptr_t BulletTransmit_get_ThroughWall = 0x3341BB4;
+static constexpr uintptr_t BulletBase_HitWall = 0x5FEF35C;
+static constexpr uintptr_t BulletBase_TriggerEnter1_HitWallInternal = 0x5FF35E8;
 static constexpr uintptr_t EntityBase_SetFlyWater = 0x4C1C294;
 static constexpr uintptr_t EntityBase_GetFlyWater = 0x4C1C4C4;
 static constexpr uintptr_t EntityBase_SetFlyStone = 0x4C1C418;
@@ -42,6 +48,7 @@ static constexpr uintptr_t EntityBase_AddSkill = 0x4C320FC;
 static constexpr uintptr_t EntityBase_ContainsSkill = 0x4C23308;
 static constexpr uintptr_t EntityBase_AddInitSkills = 0x4C33C78;
 static constexpr uintptr_t EntityHitCtrl_SetFlyOne = 0x53094B4;
+static constexpr uintptr_t MoveControl_UpdateProgress = 0x5538124;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetATKBase = 0x5904E60;
 static constexpr uintptr_t TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase = 0x5905134;
 static constexpr uintptr_t UnityEngine_Time_get_timeScale = 0x8425C64;
@@ -286,6 +293,51 @@ static constexpr uintptr_t kEntityBaseFlyStoneOffset = 0x235;
 static constexpr uintptr_t kEntityBaseHitCtrlOffset = 0xD70;
 static constexpr uintptr_t kEntityBaseMoveLayerMaskOffset = 0xE98;
 static constexpr uintptr_t kEntityHitCtrlEntityOffset = 0x10;
+static constexpr uintptr_t kBulletTransmitEntityOffset = 0x50;
+static constexpr uintptr_t kBulletTransmitWeaponDataOffset = 0x58;
+static constexpr uintptr_t kBulletTransmitThroughWallOffset = 0xC8;
+static constexpr uintptr_t kWeaponWeaponThroughWallOffset = 0x346;
+static constexpr uintptr_t kWeaponWeaponThroughInsideWallOffset = 0x348;
+static constexpr uintptr_t kBulletBaseEntityOffset = 0x88;
+static constexpr uintptr_t kBulletBaseWeaponDataOffset = 0xA0;
+static constexpr uintptr_t kBulletBaseTransmitOffset = 0xA8;
+static constexpr uintptr_t kMoveControlEntityOffset = 0x10;
+static constexpr uintptr_t kMoveControlMoveDirectionOffset = 0x70;
+static constexpr uintptr_t kIl2CppObjectHeaderSize = 0x10;
+static constexpr uintptr_t kObscuredVector3KeyOffset = 0x0;
+static constexpr uintptr_t kObscuredVector3HiddenOffset = 0x4;
+static constexpr uintptr_t kObscuredVector3InitedOffset = 0x10;
+static constexpr uintptr_t kObscuredVector3FakeOffset = 0x14;
+static constexpr uintptr_t kObscuredVector3FakeActiveOffset = 0x20;
+static constexpr int32_t kMoveProgressMaxSubsteps = 20;
+static constexpr float kMoveProgressFractionEpsilon = 0.05f;
+
+static uintptr_t g_off_entity_data_entity = kEntityDataEntityOffset;
+static uintptr_t g_off_entity_data_fly_stone_count = kEntityDataFlyStoneCountOffset;
+static uintptr_t g_off_entity_data_fly_water_count = kEntityDataFlyWaterCountOffset;
+static uintptr_t g_off_entity_base_data = kEntityBaseDataOffset;
+static uintptr_t g_off_entity_base_type = kEntityBaseTypeOffset;
+static uintptr_t g_off_entity_base_fly_water = kEntityBaseFlyWaterOffset;
+static uintptr_t g_off_entity_base_fly_stone = kEntityBaseFlyStoneOffset;
+static uintptr_t g_off_entity_base_hit_ctrl = kEntityBaseHitCtrlOffset;
+static uintptr_t g_off_entity_base_move_layer_mask = kEntityBaseMoveLayerMaskOffset;
+static uintptr_t g_off_entity_hit_ctrl_entity = kEntityHitCtrlEntityOffset;
+static uintptr_t g_off_bullet_transmit_entity = kBulletTransmitEntityOffset;
+static uintptr_t g_off_bullet_transmit_weapon_data = kBulletTransmitWeaponDataOffset;
+static uintptr_t g_off_bullet_transmit_through_wall = kBulletTransmitThroughWallOffset;
+static uintptr_t g_off_weapon_weapon_through_wall = kWeaponWeaponThroughWallOffset;
+static uintptr_t g_off_weapon_weapon_through_inside_wall = kWeaponWeaponThroughInsideWallOffset;
+static uintptr_t g_off_bullet_base_entity = kBulletBaseEntityOffset;
+static uintptr_t g_off_bullet_base_weapon_data = kBulletBaseWeaponDataOffset;
+static uintptr_t g_off_bullet_base_transmit = kBulletBaseTransmitOffset;
+static uintptr_t g_off_move_control_entity = kMoveControlEntityOffset;
+static uintptr_t g_off_move_control_move_direction = kMoveControlMoveDirectionOffset;
+static uintptr_t g_off_obscured_vector3_key = kObscuredVector3KeyOffset;
+static uintptr_t g_off_obscured_vector3_hidden = kObscuredVector3HiddenOffset;
+static uintptr_t g_off_obscured_vector3_inited = kObscuredVector3InitedOffset;
+static uintptr_t g_off_obscured_vector3_fake = kObscuredVector3FakeOffset;
+static uintptr_t g_off_obscured_vector3_fake_active = kObscuredVector3FakeActiveOffset;
+
 static constexpr int kEntityTypeHero = 1;
 static constexpr int32_t kSkillWalkThroughWater = 2080;
 static constexpr int32_t kSkillGreed = 1000040;
@@ -310,6 +362,7 @@ static volatile bool g_enable_walk_through_walls = true;
 static volatile bool g_enable_inject_greed_skill = true;
 static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
+static volatile bool g_enable_move_speed = true;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
 static volatile bool g_force_server_validation = true;
@@ -339,11 +392,13 @@ static volatile int g_material_drop_repeats = 2;
 static volatile int g_max_drop_cap_value = 65535;
 static volatile int g_max_gold_cap_value = 2000000000;
 static volatile float g_game_speed_multiplier = 4.0f;
+static volatile float g_move_speed_multiplier = 1.0f;
 
 static constexpr int kRepeatCapMax = 50;
 static uintptr_t g_il2cpp_base = 0;
 static volatile bool g_il2cpp_metadata_ready = false;
 static volatile bool g_startup_hooks_ready = false;
+static volatile bool g_field_offsets_ready = false;
 static volatile int g_il2cpp_metadata_wait_ms = 0;
 static char g_last_config_path[256] = "none";
 
@@ -356,6 +411,9 @@ static volatile uint64_t g_resolve_aob_count = 0;
 static volatile uint64_t g_resolve_xref_count = 0;
 static volatile uint64_t g_resolve_rva_count = 0;
 static volatile uint64_t g_resolve_fail_count = 0;
+static volatile uint64_t g_field_resolve_metadata_count = 0;
+static volatile uint64_t g_field_resolve_fallback_count = 0;
+static volatile uint64_t g_field_resolve_fail_count = 0;
 static volatile uint64_t g_direct_patch_resolved_count = 0;
 static volatile uint64_t g_direct_patch_write_count = 0;
 static volatile uint64_t g_direct_patch_fail_count = 0;
@@ -376,6 +434,18 @@ static volatile uint64_t g_hit_always_damage = 0;
 static volatile uint64_t g_hit_always_health = 0;
 static volatile uint64_t g_hit_always_attack_speed = 0;
 static volatile uint64_t g_hit_always_walls = 0;
+static volatile uint64_t g_hit_always_inside_walls = 0;
+static volatile uint64_t g_hit_runtime_walls_apply = 0;
+static volatile uint64_t g_hit_runtime_walls_init = 0;
+static volatile uint64_t g_hit_weapon_wall_field_apply = 0;
+static volatile uint64_t g_hit_bullet_transmit_wall_get = 0;
+static volatile uint64_t g_hit_bullet_hitwall_bypass = 0;
+static volatile uint64_t g_hit_bullet_hitwall_internal_bypass = 0;
+static volatile uint64_t g_hit_move_progress_get = 0;
+static volatile uint64_t g_hit_move_progress_apply = 0;
+static volatile uint64_t g_hit_move_progress_hero = 0;
+static volatile uint64_t g_hit_move_progress_passthrough = 0;
+static volatile uint64_t g_hit_move_progress_substeps = 0;
 static volatile uint64_t g_hit_walk_water = 0;
 static volatile uint64_t g_hit_walk_wall = 0;
 static volatile uint64_t g_hit_walk_apply = 0;
@@ -405,6 +475,9 @@ static volatile uint64_t g_hit_force_build_cheat_missed = 0;
 static volatile uint64_t g_hit_netcacheone_dump = 0;
 static volatile uint64_t g_hit_netcacheone_replay = 0;
 static volatile uint64_t g_hit_netcacheone_replay_skipped = 0;
+static volatile float g_last_move_progress_speed = 0.0f;
+static volatile float g_last_move_progress_scaled = 0.0f;
+static volatile int32_t g_last_move_progress_steps = 0;
 
 // Live BattleModuleData pointer captured from BattleModuleData.AddGold during
 // an active run. Used at settlement time (LocalSave.BattleIn_UpdateGold) to
@@ -436,6 +509,7 @@ static BuildCheatDataFn g_orig_build_cheat_data = nullptr;
 static volatile bool g_default_config_created = false;
 static char g_last_resolve_error[192] = "none";
 static char g_last_metadata_state[256] = "none";
+static char g_last_field_resolve_state[256] = "none";
 
 enum FoodTypeValue {
     FoodType_Gold = 102,
@@ -481,6 +555,16 @@ struct Vector3Lite {
     float x;
     float y;
     float z;
+};
+
+struct ObscuredVector3Snapshot {
+    int32_t key;
+    int32_t hidden_x;
+    int32_t hidden_y;
+    int32_t hidden_z;
+    uint8_t inited;
+    Vector3Lite fake;
+    uint8_t fake_active;
 };
 
 struct Patch8State {
@@ -643,6 +727,12 @@ static float clamp_game_speed(float value) {
     return value;
 }
 
+static float clamp_move_speed(float value) {
+    if (!isfinite(value) || value < 0.1f) return 1.0f;
+    if (value > 20.0f) return 20.0f;
+    return value;
+}
+
 static int32_t scale_int32(int32_t value, float multiplier) {
     if (value <= 0) return value;
     double scaled = static_cast<double>(value) * static_cast<double>(clamp_multiplier(multiplier));
@@ -692,6 +782,7 @@ struct Il2CppApi {
     void* (*class_from_name)(void*, const char*, const char*);
     void* (*class_get_method_from_name)(void*, const char*, int);
     void* (*class_get_methods)(void*, void**);
+    void* (*class_get_fields)(void*, void**);
     const char* (*class_get_name)(void*);
     const char* (*class_get_namespace)(void*);
     void* (*class_get_declaring_type)(void*);
@@ -703,11 +794,10 @@ struct Il2CppApi {
     char* (*type_get_name)(void*);
     void (*free)(void*);
     void* (*method_get_pointer)(void*);
-    void* (*object_get_class)(void*);
-    void* (*class_get_fields)(void*, void**);
     const char* (*field_get_name)(void*);
-    void* (*field_get_type)(void*);
     size_t (*field_get_offset)(void*);
+    void* (*object_get_class)(void*);
+    void* (*field_get_type)(void*);
     uint32_t (*gchandle_new)(void*, int);
     void (*gchandle_free)(uint32_t);
     void* (*gchandle_get_target)(uint32_t);
@@ -726,6 +816,12 @@ static void set_last_metadata_state(const char* text) {
     if (!text) return;
     strncpy(g_last_metadata_state, text, sizeof(g_last_metadata_state) - 1);
     g_last_metadata_state[sizeof(g_last_metadata_state) - 1] = '\0';
+}
+
+static void set_last_field_resolve_state(const char* text) {
+    if (!text) return;
+    strncpy(g_last_field_resolve_state, text, sizeof(g_last_field_resolve_state) - 1);
+    g_last_field_resolve_state[sizeof(g_last_field_resolve_state) - 1] = '\0';
 }
 
 static int read_module_segments(const char* module_name, ModuleSegment* segments, int max_segments) {
@@ -1109,6 +1205,7 @@ static bool resolve_il2cpp_api() {
     g_il2cpp_api.class_from_name = reinterpret_cast<void* (*)(void*, const char*, const char*)>(resolve_symbol("il2cpp_class_from_name"));
     g_il2cpp_api.class_get_method_from_name = reinterpret_cast<void* (*)(void*, const char*, int)>(resolve_symbol("il2cpp_class_get_method_from_name"));
     g_il2cpp_api.class_get_methods = reinterpret_cast<void* (*)(void*, void**)>(resolve_symbol("il2cpp_class_get_methods"));
+    g_il2cpp_api.class_get_fields = reinterpret_cast<void* (*)(void*, void**)>(resolve_symbol("il2cpp_class_get_fields"));
     g_il2cpp_api.class_get_name = reinterpret_cast<const char* (*)(void*)>(resolve_symbol("il2cpp_class_get_name"));
     g_il2cpp_api.class_get_namespace = reinterpret_cast<const char* (*)(void*)>(resolve_symbol("il2cpp_class_get_namespace"));
     g_il2cpp_api.class_get_declaring_type = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_class_get_declaring_type"));
@@ -1121,10 +1218,7 @@ static bool resolve_il2cpp_api() {
     g_il2cpp_api.free = reinterpret_cast<void (*)(void*)>(resolve_symbol("il2cpp_free"));
     g_il2cpp_api.method_get_pointer = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_method_get_pointer"));
     g_il2cpp_api.object_get_class = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_object_get_class"));
-    g_il2cpp_api.class_get_fields = reinterpret_cast<void* (*)(void*, void**)>(resolve_symbol("il2cpp_class_get_fields"));
-    g_il2cpp_api.field_get_name = reinterpret_cast<const char* (*)(void*)>(resolve_symbol("il2cpp_field_get_name"));
     g_il2cpp_api.field_get_type = reinterpret_cast<void* (*)(void*)>(resolve_symbol("il2cpp_field_get_type"));
-    g_il2cpp_api.field_get_offset = reinterpret_cast<size_t (*)(void*)>(resolve_symbol("il2cpp_field_get_offset"));
     g_il2cpp_api.gchandle_new = reinterpret_cast<uint32_t (*)(void*, int)>(resolve_symbol("il2cpp_gchandle_new"));
     g_il2cpp_api.gchandle_free = reinterpret_cast<void (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_free"));
     g_il2cpp_api.gchandle_get_target = reinterpret_cast<void* (*)(uint32_t)>(resolve_symbol("il2cpp_gchandle_get_target"));
@@ -1334,6 +1428,180 @@ static uintptr_t resolve_by_metadata(const HookSpec& spec) {
              spec.namespaze ? spec.namespaze : "", spec.klass ? spec.klass : "", spec.method ? spec.method : "", spec.arg_count);
     set_last_metadata_state(state);
     return 0;
+}
+
+static void* resolve_class_by_metadata_name(const char* namespaze, const char* klass) {
+    if (!resolve_il2cpp_api() || !klass) return nullptr;
+    static const char* kAssemblyNames[] = {
+        "Assembly-CSharp",
+        "Assembly-CSharp.dll",
+        "UnityEngine.CoreModule",
+        "UnityEngine.CoreModule.dll",
+        "mscorlib",
+        "mscorlib.dll",
+        nullptr
+    };
+    HookSpec spec = {0, namespaze ? namespaze : "", klass, nullptr, 0, nullptr, nullptr, nullptr};
+    if (g_il2cpp_api.domain_get_assemblies) {
+        size_t assembly_count = 0;
+        void** assemblies = g_il2cpp_api.domain_get_assemblies(nullptr, &assembly_count);
+        if (assemblies && assembly_count > 0 && assembly_count < 1024) {
+            for (size_t i = 0; i < assembly_count; ++i) {
+                if (!assemblies[i]) continue;
+                void* image = g_il2cpp_api.assembly_get_image(assemblies[i]);
+                void* found = resolve_class_in_image(image, spec);
+                if (found) return found;
+            }
+        }
+    }
+    for (int i = 0; kAssemblyNames[i] != nullptr; ++i) {
+        void* assembly = g_il2cpp_api.domain_assembly_open(nullptr, kAssemblyNames[i]);
+        if (!assembly) continue;
+        void* image = g_il2cpp_api.assembly_get_image(assembly);
+        void* found = resolve_class_in_image(image, spec);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static bool resolve_field_offset_by_metadata(const char* namespaze,
+                                             const char* klass,
+                                             const char* field_name,
+                                             uintptr_t fallback,
+                                             uintptr_t* out) {
+    if (!out) return false;
+    *out = fallback;
+    if (!resolve_il2cpp_api() || !g_il2cpp_api.class_get_fields ||
+        !g_il2cpp_api.field_get_name || !g_il2cpp_api.field_get_offset) {
+        bump(g_field_resolve_fallback_count);
+        bump(g_field_resolve_fail_count);
+        set_last_field_resolve_state("field_api_missing");
+        return false;
+    }
+
+    void* klass_ptr = resolve_class_by_metadata_name(namespaze, klass);
+    if (!klass_ptr) {
+        bump(g_field_resolve_fallback_count);
+        bump(g_field_resolve_fail_count);
+        char state[256];
+        snprintf(state, sizeof(state), "class_missing %s.%s.%s fallback=0x%lx",
+                 namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
+                 static_cast<unsigned long>(fallback));
+        set_last_field_resolve_state(state);
+        return false;
+    }
+
+    void* iter = nullptr;
+    void* field = nullptr;
+    while ((field = g_il2cpp_api.class_get_fields(klass_ptr, &iter)) != nullptr) {
+        const char* name = g_il2cpp_api.field_get_name(field);
+        if (!name || !field_name || strcmp(name, field_name) != 0) continue;
+        size_t offset = g_il2cpp_api.field_get_offset(field);
+        if (offset >= 0x100000) {
+            bump(g_field_resolve_fallback_count);
+            bump(g_field_resolve_fail_count);
+            char state[256];
+            snprintf(state, sizeof(state), "offset_invalid %s.%s.%s offset=0x%lx fallback=0x%lx",
+                     namespaze ? namespaze : "", klass ? klass : "", field_name,
+                     static_cast<unsigned long>(offset),
+                     static_cast<unsigned long>(fallback));
+            set_last_field_resolve_state(state);
+            return false;
+        }
+        *out = static_cast<uintptr_t>(offset);
+        bump(g_field_resolve_metadata_count);
+        return true;
+    }
+
+    bump(g_field_resolve_fallback_count);
+    bump(g_field_resolve_fail_count);
+    char state[256];
+    snprintf(state, sizeof(state), "field_missing %s.%s.%s fallback=0x%lx",
+             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
+             static_cast<unsigned long>(fallback));
+    set_last_field_resolve_state(state);
+    return false;
+}
+
+static bool resolve_value_type_field_offset_by_metadata(const char* namespaze,
+                                                        const char* klass,
+                                                        const char* field_name,
+                                                        uintptr_t fallback,
+                                                        uintptr_t* out) {
+    bool ok = resolve_field_offset_by_metadata(namespaze, klass, field_name, fallback, out);
+    if (!ok || !out) return ok;
+    if (*out >= kIl2CppObjectHeaderSize) {
+        *out -= kIl2CppObjectHeaderSize;
+        return true;
+    }
+
+    *out = fallback;
+    bump(g_field_resolve_fallback_count);
+    bump(g_field_resolve_fail_count);
+    char state[256];
+    snprintf(state, sizeof(state), "value_type_offset_invalid %s.%s.%s fallback=0x%lx",
+             namespaze ? namespaze : "", klass ? klass : "", field_name ? field_name : "",
+             static_cast<unsigned long>(fallback));
+    set_last_field_resolve_state(state);
+    return false;
+}
+
+static void resolve_runtime_field_offsets() {
+    g_field_offsets_ready = false;
+    int requested = 0;
+    int resolved = 0;
+#define RESOLVE_FIELD_OFFSET(storage, ns, klass, field, fallback) \
+    do { \
+        ++requested; \
+        if (resolve_field_offset_by_metadata((ns), (klass), (field), (fallback), &(storage))) { \
+            ++resolved; \
+        } \
+    } while (0)
+#define RESOLVE_VALUE_FIELD_OFFSET(storage, ns, klass, field, fallback) \
+    do { \
+        ++requested; \
+        if (resolve_value_type_field_offset_by_metadata((ns), (klass), (field), (fallback), &(storage))) { \
+            ++resolved; \
+        } \
+    } while (0)
+
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_entity, "", "EntityData", "m_Entity", kEntityDataEntityOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_stone_count, "", "EntityData", "mFlyStoneCount", kEntityDataFlyStoneCountOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_data_fly_water_count, "", "EntityData", "mFlyWaterCount", kEntityDataFlyWaterCountOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_data, "", "EntityBase", "m_EntityData", kEntityBaseDataOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_type, "", "EntityBase", "m_Type", kEntityBaseTypeOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_water, "", "EntityBase", "bFlyWater", kEntityBaseFlyWaterOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_fly_stone, "", "EntityBase", "bFlyStone", kEntityBaseFlyStoneOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_hit_ctrl, "", "EntityBase", "mHitCtrl", kEntityBaseHitCtrlOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_base_move_layer_mask, "", "EntityBase", "move_layermask", kEntityBaseMoveLayerMaskOffset);
+    RESOLVE_FIELD_OFFSET(g_off_entity_hit_ctrl_entity, "", "EntityHitCtrl", "m_Entity", kEntityHitCtrlEntityOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_entity, "", "BulletTransmit", "m_Entity", kBulletTransmitEntityOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_weapon_data, "", "BulletTransmit", "weapondata", kBulletTransmitWeaponDataOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_transmit_through_wall, "", "BulletTransmit", "<ThroughWall>k__BackingField", kBulletTransmitThroughWallOffset);
+    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_wall, "TableTool", "Weapon_weapon", "bThroughWallp", kWeaponWeaponThroughWallOffset);
+    RESOLVE_FIELD_OFFSET(g_off_weapon_weapon_through_inside_wall, "TableTool", "Weapon_weapon", "bThroughInsideWallp", kWeaponWeaponThroughInsideWallOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_entity, "", "BulletBase", "<m_Entity>k__BackingField", kBulletBaseEntityOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_weapon_data, "", "BulletBase", "m_Data", kBulletBaseWeaponDataOffset);
+    RESOLVE_FIELD_OFFSET(g_off_bullet_base_transmit, "", "BulletBase", "mBulletTransmit", kBulletBaseTransmitOffset);
+    RESOLVE_FIELD_OFFSET(g_off_move_control_entity, "", "MoveControl", "m_Entity", kMoveControlEntityOffset);
+    RESOLVE_FIELD_OFFSET(g_off_move_control_move_direction, "", "MoveControl", "MoveDirection", kMoveControlMoveDirectionOffset);
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_key, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "currentCryptoKey", kObscuredVector3KeyOffset);
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_hidden, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "hiddenValue", kObscuredVector3HiddenOffset);
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited", kObscuredVector3InitedOffset);
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue", kObscuredVector3FakeOffset);
+    RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive", kObscuredVector3FakeActiveOffset);
+
+#undef RESOLVE_VALUE_FIELD_OFFSET
+#undef RESOLVE_FIELD_OFFSET
+
+    g_field_offsets_ready = (resolved == requested);
+    char state[256];
+    snprintf(state, sizeof(state), "resolved=%d/%d ready=%d bullet_through=0x%lx move_dir=0x%lx entity_type=0x%lx",
+             resolved, requested, g_field_offsets_ready ? 1 : 0,
+             static_cast<unsigned long>(g_off_bullet_transmit_through_wall),
+             static_cast<unsigned long>(g_off_move_control_move_direction),
+             static_cast<unsigned long>(g_off_entity_base_type));
+    set_last_field_resolve_state(state);
 }
 
 static const HookSpec kHookSpecs[] = {
@@ -1559,6 +1827,12 @@ static const HookSpec kHookSpecs[] = {
     {rva::TableTool_Weapon_weapon_get_Speed, "TableTool", "Weapon_weapon", "get_Speed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 50 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
     {rva::TableTool_Weapon_weapon_get_AttackSpeed, "TableTool", "Weapon_weapon", "get_AttackSpeed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 B0 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
     {rva::TableTool_Weapon_weapon_get_bThroughWall, "TableTool", "Weapon_weapon", "get_bThroughWall", 0, nullptr, "FE 4F BF A9 F3 03 00 AA ?? ?? ?? ?? 60 1A 4D 39 FE 4F C1 A8 C0 03 5F D6", nullptr},
+    {rva::TableTool_Weapon_weapon_get_bThroughInsideWall, "TableTool", "Weapon_weapon", "get_bThroughInsideWall", 0, nullptr, nullptr, nullptr},
+    {rva::BulletTransmit_Init_Simple, "", "BulletTransmit", "Init", 4, "EntityBase", nullptr, nullptr},
+    {rva::BulletTransmit_Init_Full, "", "BulletTransmit", "Init", 8, "EntityBase", nullptr, nullptr},
+    {rva::BulletTransmit_get_ThroughWall, "", "BulletTransmit", "get_ThroughWall", 0, nullptr, nullptr, nullptr},
+    {rva::BulletBase_HitWall, "", "BulletBase", "HitWall", 1, "UnityEngine.Collider", nullptr, nullptr},
+    {rva::BulletBase_TriggerEnter1_HitWallInternal, "", "BulletBase", "<TriggerEnter1>g__HitWallInternal|337_0", 1, nullptr, nullptr, nullptr},
     {rva::EntityBase_SetFlyWater, "", "EntityBase", "SetFlyWater", 1, nullptr, nullptr, nullptr},
     {rva::EntityBase_GetFlyWater, "", "EntityBase", "GetFlyWater", 0, nullptr, nullptr, nullptr},
     {rva::EntityBase_SetFlyStone, "", "EntityBase", "SetFlyStone", 1, nullptr, nullptr, nullptr},
@@ -1570,6 +1844,7 @@ static const HookSpec kHookSpecs[] = {
     {rva::EntityBase_ContainsSkill, "", "EntityBase", "ContainsSkill", 1, "System.Int32", nullptr, nullptr},
     {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr, nullptr, nullptr},
     {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr, nullptr, nullptr},
+    {rva::MoveControl_UpdateProgress, "", "MoveControl", "UpdateProgress", 0, nullptr, nullptr, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr, "FE 4F BF A9 ?? ?? ?? ?? 60 2E 46 F9 A0 00 00 B5 ?? ?? ?? ?? 00 B4 06 91 ?? ?? ?? ?? 60 2E 06 F9 FE 4F C1 A8 00 00 1F D6", "UnityEngine.Time::get_timeScale()"},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr, "E8 0F 1E FC FE 4F 01 A9 ?? ?? ?? ?? 60 32 46 F9 08 1C A0 4E A0 00 00 B5 ?? ?? ?? ?? 00 F0 0F 91 ?? ?? ?? ?? 60 32 06 F9", "UnityEngine.Time::set_timeScale(System.Single)"},
 };
@@ -1732,6 +2007,8 @@ static bool write_default_config_file(const char* path) {
         "inject_smart_skill=1\n"
         "game_speed=1\n"
         "game_speed_multiplier=4\n"
+        "move_speed=1\n"
+        "move_speed_multiplier=1\n"
         "install_gold_hooks=0\n"
         "force_server_validation=1\n"
         "dump_netcacheone=1\n"
@@ -1867,6 +2144,7 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "inject_greed_skill") == 0) g_enable_inject_greed_skill = parse_bool_value(value);
     else if (strcmp(key, "inject_smart_skill") == 0) g_enable_inject_smart_skill = parse_bool_value(value);
     else if (strcmp(key, "game_speed") == 0) g_enable_game_speed = parse_bool_value(value);
+    else if (strcmp(key, "move_speed") == 0) g_enable_move_speed = parse_bool_value(value);
     else if (strcmp(key, "install_gold_hooks") == 0) g_install_gold_hooks = parse_bool_value(value);
     else if (strcmp(key, "force_server_validation") == 0) g_force_server_validation = parse_bool_value(value);
     else if (strcmp(key, "dump_netcacheone") == 0) g_dump_netcacheone = parse_bool_value(value);
@@ -1898,6 +2176,7 @@ static void set_config_value(const char* key, const char* value) {
     else if (strcmp(key, "max_drop_cap_value") == 0) g_max_drop_cap_value = clamp_max_drop_cap(static_cast<int>(strtol(value, nullptr, 10)));
     else if (strcmp(key, "max_gold_cap_value") == 0) g_max_gold_cap_value = clamp_max_gold_cap(strtoll(value, nullptr, 10));
     else if (strcmp(key, "game_speed_multiplier") == 0) g_game_speed_multiplier = clamp_game_speed(strtof(value, nullptr));
+    else if (strcmp(key, "move_speed_multiplier") == 0) g_move_speed_multiplier = clamp_move_speed(strtof(value, nullptr));
 }
 
 static bool load_config_file_path(const char* path) {
@@ -2002,6 +2281,8 @@ static void write_status_file_once() {
     fprintf(f, "inject_smart_skill=%d\n", g_enable_inject_smart_skill ? 1 : 0);
     fprintf(f, "game_speed=%d\n", g_enable_game_speed ? 1 : 0);
     fprintf(f, "game_speed_multiplier=%f\n", static_cast<double>(g_game_speed_multiplier));
+    fprintf(f, "move_speed=%d\n", g_enable_move_speed ? 1 : 0);
+    fprintf(f, "move_speed_multiplier=%f\n", static_cast<double>(g_move_speed_multiplier));
     fprintf(f, "install_gold_hooks=%d\n", g_install_gold_hooks ? 1 : 0);
     fprintf(f, "gold_hooks_installed=%d\n", g_gold_hooks_installed ? 1 : 0);
     fprintf(f, "force_server_validation=%d\n", g_force_server_validation ? 1 : 0);
@@ -2026,6 +2307,20 @@ static void write_status_file_once() {
     fprintf(f, "resolver.fail=%llu\n", static_cast<unsigned long long>(g_resolve_fail_count));
     fprintf(f, "resolver.last_error=%s\n", g_last_resolve_error);
     fprintf(f, "resolver.metadata_state=%s\n", g_last_metadata_state);
+    fprintf(f, "field_resolver.metadata=%llu\n", static_cast<unsigned long long>(g_field_resolve_metadata_count));
+    fprintf(f, "field_resolver.fallback=%llu\n", static_cast<unsigned long long>(g_field_resolve_fallback_count));
+    fprintf(f, "field_resolver.fail=%llu\n", static_cast<unsigned long long>(g_field_resolve_fail_count));
+    fprintf(f, "field_resolver.state=%s\n", g_last_field_resolve_state);
+    fprintf(f, "field_offsets_ready=%d\n", g_field_offsets_ready ? 1 : 0);
+    fprintf(f, "field_offsets.entity_type=0x%lx\n", static_cast<unsigned long>(g_off_entity_base_type));
+    fprintf(f, "field_offsets.bullet_through_wall=0x%lx\n", static_cast<unsigned long>(g_off_bullet_transmit_through_wall));
+    fprintf(f, "field_offsets.move_direction=0x%lx\n", static_cast<unsigned long>(g_off_move_control_move_direction));
+    fprintf(f, "field_offsets.obscured_vector3=key:0x%lx hidden:0x%lx inited:0x%lx fake:0x%lx active:0x%lx\n",
+            static_cast<unsigned long>(g_off_obscured_vector3_key),
+            static_cast<unsigned long>(g_off_obscured_vector3_hidden),
+            static_cast<unsigned long>(g_off_obscured_vector3_inited),
+            static_cast<unsigned long>(g_off_obscured_vector3_fake),
+            static_cast<unsigned long>(g_off_obscured_vector3_fake_active));
     fprintf(f, "direct_patch.resolved=%llu\n", static_cast<unsigned long long>(g_direct_patch_resolved_count));
     fprintf(f, "direct_patch.writes=%llu\n", static_cast<unsigned long long>(g_direct_patch_write_count));
     fprintf(f, "direct_patch.fail=%llu\n", static_cast<unsigned long long>(g_direct_patch_fail_count));
@@ -2068,6 +2363,21 @@ static void write_status_file_once() {
     fprintf(f, "hits.always_health=%llu\n", static_cast<unsigned long long>(g_hit_always_health));
     fprintf(f, "hits.always_attack_speed=%llu\n", static_cast<unsigned long long>(g_hit_always_attack_speed));
     fprintf(f, "hits.always_walls=%llu\n", static_cast<unsigned long long>(g_hit_always_walls));
+    fprintf(f, "hits.always_inside_walls=%llu\n", static_cast<unsigned long long>(g_hit_always_inside_walls));
+    fprintf(f, "hits.runtime_walls_apply=%llu\n", static_cast<unsigned long long>(g_hit_runtime_walls_apply));
+    fprintf(f, "hits.runtime_walls_init=%llu\n", static_cast<unsigned long long>(g_hit_runtime_walls_init));
+    fprintf(f, "hits.weapon_wall_field_apply=%llu\n", static_cast<unsigned long long>(g_hit_weapon_wall_field_apply));
+    fprintf(f, "hits.bullet_transmit_wall_get=%llu\n", static_cast<unsigned long long>(g_hit_bullet_transmit_wall_get));
+    fprintf(f, "hits.bullet_hitwall_bypass=%llu\n", static_cast<unsigned long long>(g_hit_bullet_hitwall_bypass));
+    fprintf(f, "hits.bullet_hitwall_internal_bypass=%llu\n", static_cast<unsigned long long>(g_hit_bullet_hitwall_internal_bypass));
+    fprintf(f, "hits.move_progress_get=%llu\n", static_cast<unsigned long long>(g_hit_move_progress_get));
+    fprintf(f, "hits.move_progress_apply=%llu\n", static_cast<unsigned long long>(g_hit_move_progress_apply));
+    fprintf(f, "hits.move_progress_hero=%llu\n", static_cast<unsigned long long>(g_hit_move_progress_hero));
+    fprintf(f, "hits.move_progress_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_move_progress_passthrough));
+    fprintf(f, "hits.move_progress_substeps=%llu\n", static_cast<unsigned long long>(g_hit_move_progress_substeps));
+    fprintf(f, "move_progress_last_speed=%f\n", static_cast<double>(g_last_move_progress_speed));
+    fprintf(f, "move_progress_last_scaled=%f\n", static_cast<double>(g_last_move_progress_scaled));
+    fprintf(f, "move_progress_last_steps=%d\n", static_cast<int>(g_last_move_progress_steps));
     fprintf(f, "hits.walk_water=%llu\n", static_cast<unsigned long long>(g_hit_walk_water));
     fprintf(f, "hits.walk_wall=%llu\n", static_cast<unsigned long long>(g_hit_walk_wall));
     fprintf(f, "hits.walk_apply=%llu\n", static_cast<unsigned long long>(g_hit_walk_apply));
@@ -2122,44 +2432,94 @@ static void* config_thread(void*) {
 static int get_entity_type_from_entity_base(void* entity_base);
 
 static int get_entity_type_from_entity_data(void* thiz) {
-    if (!thiz) return -1;
+    if (!g_field_offsets_ready || !thiz) return -1;
     void* entity_base = *reinterpret_cast<void**>(
-        reinterpret_cast<uintptr_t>(thiz) + kEntityDataEntityOffset
+        reinterpret_cast<uintptr_t>(thiz) + g_off_entity_data_entity
     );
     if (!entity_base) return -1;
     return get_entity_type_from_entity_base(entity_base);
 }
 
 static int get_entity_type_from_entity_base(void* entity_base) {
-    if (!entity_base) return -1;
+    if (!g_field_offsets_ready || !entity_base) return -1;
     return *reinterpret_cast<int*>(
-        reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseTypeOffset
+        reinterpret_cast<uintptr_t>(entity_base) + g_off_entity_base_type
     );
 }
 
 static void* get_entity_base_from_hit_ctrl(void* hit_ctrl) {
-    if (!hit_ctrl) return nullptr;
+    if (!g_field_offsets_ready || !hit_ctrl) return nullptr;
     return *reinterpret_cast<void**>(
-        reinterpret_cast<uintptr_t>(hit_ctrl) + kEntityHitCtrlEntityOffset
-    );
-}
-
-static void* get_hit_ctrl_from_entity_base(void* entity_base) {
-    if (!entity_base) return nullptr;
-    return *reinterpret_cast<void**>(
-        reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseHitCtrlOffset
+        reinterpret_cast<uintptr_t>(hit_ctrl) + g_off_entity_hit_ctrl_entity
     );
 }
 
 static void* get_entity_data_from_entity_base(void* entity_base) {
-    if (!entity_base) return nullptr;
+    if (!g_field_offsets_ready || !entity_base) return nullptr;
     return *reinterpret_cast<void**>(
-        reinterpret_cast<uintptr_t>(entity_base) + kEntityBaseDataOffset
+        reinterpret_cast<uintptr_t>(entity_base) + g_off_entity_base_data
     );
 }
 
 static bool is_hero_entity_base(void* entity_base) {
     return get_entity_type_from_entity_base(entity_base) == kEntityTypeHero;
+}
+
+static void* get_entity_base_from_bullet_transmit(void* transmit) {
+    if (!g_field_offsets_ready || !transmit) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(transmit) + g_off_bullet_transmit_entity
+    );
+}
+
+static void* get_weapon_data_from_bullet_transmit(void* transmit) {
+    if (!g_field_offsets_ready || !transmit) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(transmit) + g_off_bullet_transmit_weapon_data
+    );
+}
+
+static void* get_entity_base_from_bullet_base(void* bullet_base) {
+    if (!g_field_offsets_ready || !bullet_base) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(bullet_base) + g_off_bullet_base_entity
+    );
+}
+
+static void* get_weapon_data_from_bullet_base(void* bullet_base) {
+    if (!g_field_offsets_ready || !bullet_base) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(bullet_base) + g_off_bullet_base_weapon_data
+    );
+}
+
+static void* get_bullet_transmit_from_bullet_base(void* bullet_base) {
+    if (!g_field_offsets_ready || !bullet_base) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(bullet_base) + g_off_bullet_base_transmit
+    );
+}
+
+static void* get_entity_base_from_move_control(void* move_control) {
+    if (!g_field_offsets_ready || !move_control) return nullptr;
+    return *reinterpret_cast<void**>(
+        reinterpret_cast<uintptr_t>(move_control) + g_off_move_control_entity
+    );
+}
+
+static void force_bullet_transmit_through_wall(void* transmit) {
+    if (!g_field_offsets_ready || !transmit) return;
+    *reinterpret_cast<volatile uint8_t*>(
+        reinterpret_cast<uintptr_t>(transmit) + g_off_bullet_transmit_through_wall
+    ) = 1;
+}
+
+static void force_weapon_data_through_wall(void* weapon_data) {
+    if (!g_field_offsets_ready || !weapon_data) return;
+    uintptr_t base = reinterpret_cast<uintptr_t>(weapon_data);
+    *reinterpret_cast<volatile uint8_t*>(base + g_off_weapon_weapon_through_wall) = 1;
+    *reinterpret_cast<volatile uint8_t*>(base + g_off_weapon_weapon_through_inside_wall) = 1;
+    bump(g_hit_weapon_wall_field_apply);
 }
 
 struct Il2CppStringLite {
@@ -2187,25 +2547,24 @@ static bool should_force_fly_layer(void* layer) {
     }
     if (!g_enable_walk_through_walls) return false;
     return il2cpp_string_equals_ascii(layer, "Entity2Stone") ||
-           il2cpp_string_equals_ascii(layer, "Entity2MapOutWall") ||
            il2cpp_string_equals_ascii(layer, "Entity2DragonStone");
 }
 
 static void set_hero_traversal_flags_direct(void* entity_base) {
-    if (!entity_base || !is_hero_entity_base(entity_base)) return;
+    if (!g_field_offsets_ready || !entity_base || !is_hero_entity_base(entity_base)) return;
     uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
     if (g_enable_walk_through_water) {
-        *reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyWaterOffset) = 1;
+        *reinterpret_cast<volatile uint8_t*>(base + g_off_entity_base_fly_water) = 1;
     }
     if (g_enable_walk_through_walls) {
-        *reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyStoneOffset) = 1;
+        *reinterpret_cast<volatile uint8_t*>(base + g_off_entity_base_fly_stone) = 1;
     }
     void* entity_data = get_entity_data_from_entity_base(entity_base);
     if (entity_data) {
         uintptr_t data = reinterpret_cast<uintptr_t>(entity_data);
         if (g_enable_walk_through_water) {
             volatile int32_t* count = reinterpret_cast<volatile int32_t*>(
-                data + kEntityDataFlyWaterCountOffset
+                data + g_off_entity_data_fly_water_count
             );
             if (*count <= 0) {
                 *count = 1;
@@ -2214,21 +2573,12 @@ static void set_hero_traversal_flags_direct(void* entity_base) {
         }
         if (g_enable_walk_through_walls) {
             volatile int32_t* count = reinterpret_cast<volatile int32_t*>(
-                data + kEntityDataFlyStoneCountOffset
+                data + g_off_entity_data_fly_stone_count
             );
             if (*count <= 0) {
                 *count = 1;
                 bump(g_hit_walk_entitydata_apply);
             }
-        }
-    }
-    if (g_enable_walk_through_water || g_enable_walk_through_walls) {
-        volatile int32_t* move_mask = reinterpret_cast<volatile int32_t*>(
-            base + kEntityBaseMoveLayerMaskOffset
-        );
-        if (*move_mask != 0) {
-            *move_mask = 0;
-            bump(g_hit_walk_mask_apply);
         }
     }
     bump(g_hit_walk_apply);
@@ -2239,6 +2589,10 @@ using GetMissFn = bool (*)(void* thiz, void* otherhs, void* method);
 using UpgradeBaseIntFn = int32_t (*)(void* thiz, int32_t charid, void* method);
 using WeaponFloatGetterFn = float (*)(void* thiz, void* method);
 using WeaponBoolGetterFn = bool (*)(void* thiz, void* method);
+using BulletTransmitInitSimpleFn = void* (*)(void* thiz, void* entity, int32_t bullet_id, bool clear, float final_hit_ratio, void* method);
+using BulletTransmitInitFullFn = void* (*)(void* thiz, void* entity, int32_t bullet_id, float attack_ratio, float back_ratio, int32_t through_enemy, float through_ratio, bool clear, float final_hit_ratio, void* method);
+using BulletTransmitBoolGetterFn = bool (*)(void* thiz, void* method);
+using BulletBaseWallFn = void (*)(void* thiz, void* collider_or_state, void* method);
 using EntityBoolGetterFn = bool (*)(void* thiz, void* method);
 using EntitySetBoolFn = void (*)(void* thiz, bool value, void* method);
 using EntityVoidFn = void (*)(void* thiz, void* method);
@@ -2246,6 +2600,7 @@ using EntityAddSkillFn = void (*)(void* thiz, int32_t skill_id, void* method);
 using EntityContainsSkillFn = bool (*)(void* thiz, int32_t skill_id, void* method);
 using EntityVector3Fn = Vector3Lite (*)(void* thiz, Vector3Lite value, void* method);
 using EntitySetFlyOneFn = void (*)(void* thiz, void* layer, bool value, void* method);
+using MoveControlVoidFn = void (*)(void* thiz, void* method);
 using TimeScaleGetterFn = float (*)(void* method);
 using TimeScaleSetterFn = void (*)(float value, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
@@ -2255,6 +2610,12 @@ static UpgradeBaseIntFn g_orig_get_hp_base = nullptr;
 static WeaponFloatGetterFn g_orig_weapon_get_speed = nullptr;
 static WeaponFloatGetterFn g_orig_weapon_get_attack_speed = nullptr;
 static WeaponBoolGetterFn g_orig_weapon_get_through_wall = nullptr;
+static WeaponBoolGetterFn g_orig_weapon_get_through_inside_wall = nullptr;
+static BulletTransmitInitSimpleFn g_orig_bullet_transmit_init_simple = nullptr;
+static BulletTransmitInitFullFn g_orig_bullet_transmit_init_full = nullptr;
+static BulletTransmitBoolGetterFn g_orig_bullet_transmit_get_through_wall = nullptr;
+static BulletBaseWallFn g_orig_bulletbase_hit_wall = nullptr;
+static BulletBaseWallFn g_orig_bulletbase_hitwall_internal = nullptr;
 static EntitySetBoolFn g_orig_entitybase_set_fly_water = nullptr;
 static EntityBoolGetterFn g_orig_entitybase_get_fly_water = nullptr;
 static EntitySetBoolFn g_orig_entitybase_set_fly_stone = nullptr;
@@ -2266,6 +2627,7 @@ static EntityVoidFn g_orig_entitybase_add_init_skills = nullptr;
 static EntityAddSkillFn g_entitybase_add_skill = nullptr;
 static EntityContainsSkillFn g_entitybase_contains_skill = nullptr;
 static EntitySetFlyOneFn g_orig_entityhitctrl_set_fly_one = nullptr;
+static MoveControlVoidFn g_orig_movecontrol_update_progress = nullptr;
 static TimeScaleGetterFn g_orig_time_get_scale = nullptr;
 static TimeScaleSetterFn g_orig_time_set_scale = nullptr;
 static uintptr_t g_last_traversal_entity = 0;
@@ -2275,27 +2637,27 @@ static uintptr_t g_last_smart_skill_inject_entity = 0;
 static __thread bool g_applying_traversal_runtime = false;
 
 static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
-    if (!entity_base || !is_hero_entity_base(entity_base)) return false;
+    if (!g_field_offsets_ready || !entity_base || !is_hero_entity_base(entity_base)) return false;
     uintptr_t base = reinterpret_cast<uintptr_t>(entity_base);
     bool needs_sync = first_seen;
     if (g_enable_walk_through_water) {
         needs_sync = needs_sync ||
-            (*reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyWaterOffset) == 0);
+            (*reinterpret_cast<volatile uint8_t*>(base + g_off_entity_base_fly_water) == 0);
     }
     if (g_enable_walk_through_walls) {
         needs_sync = needs_sync ||
-            (*reinterpret_cast<volatile uint8_t*>(base + kEntityBaseFlyStoneOffset) == 0);
+            (*reinterpret_cast<volatile uint8_t*>(base + g_off_entity_base_fly_stone) == 0);
     }
     void* entity_data = get_entity_data_from_entity_base(entity_base);
     if (entity_data) {
         uintptr_t data = reinterpret_cast<uintptr_t>(entity_data);
         if (g_enable_walk_through_water) {
             needs_sync = needs_sync ||
-                (*reinterpret_cast<volatile int32_t*>(data + kEntityDataFlyWaterCountOffset) <= 0);
+                (*reinterpret_cast<volatile int32_t*>(data + g_off_entity_data_fly_water_count) <= 0);
         }
         if (g_enable_walk_through_walls) {
             needs_sync = needs_sync ||
-                (*reinterpret_cast<volatile int32_t*>(data + kEntityDataFlyStoneCountOffset) <= 0);
+                (*reinterpret_cast<volatile int32_t*>(data + g_off_entity_data_fly_stone_count) <= 0);
         }
     }
     return needs_sync;
@@ -2394,13 +2756,40 @@ static void apply_hero_traversal_runtime(void* entity_base) {
         if (g_orig_entitybase_set_fly_stone) {
             g_orig_entitybase_set_fly_stone(entity_base, true, nullptr);
         }
-        if (g_orig_entitybase_set_fly_all) {
-            g_orig_entitybase_set_fly_all(entity_base, true, nullptr);
-        }
     }
     set_hero_traversal_flags_direct(entity_base);
     bump(g_hit_walk_runtime_apply);
     g_applying_traversal_runtime = false;
+}
+
+static void apply_hero_bullet_runtime_wall(void* transmit, void* entity_hint, bool from_init) {
+    if (!g_enable_shoot_through_walls || !transmit) return;
+    void* entity_base = entity_hint ? entity_hint : get_entity_base_from_bullet_transmit(transmit);
+    if (!is_hero_entity_base(entity_base)) return;
+    force_weapon_data_through_wall(get_weapon_data_from_bullet_transmit(transmit));
+    force_bullet_transmit_through_wall(transmit);
+    if (from_init) bump(g_hit_runtime_walls_init);
+    else bump(g_hit_runtime_walls_apply);
+}
+
+static bool is_hero_bullet_base(void* bullet_base) {
+    if (!g_enable_shoot_through_walls || !bullet_base) return false;
+    void* entity_base = get_entity_base_from_bullet_base(bullet_base);
+    if (!entity_base) {
+        entity_base = get_entity_base_from_bullet_transmit(get_bullet_transmit_from_bullet_base(bullet_base));
+    }
+    return is_hero_entity_base(entity_base);
+}
+
+static void apply_hero_bulletbase_runtime_wall(void* bullet_base) {
+    if (!is_hero_bullet_base(bullet_base)) return;
+    force_weapon_data_through_wall(get_weapon_data_from_bullet_base(bullet_base));
+    void* transmit = get_bullet_transmit_from_bullet_base(bullet_base);
+    if (transmit) {
+        force_weapon_data_through_wall(get_weapon_data_from_bullet_transmit(transmit));
+        force_bullet_transmit_through_wall(transmit);
+        bump(g_hit_runtime_walls_apply);
+    }
 }
 
 static bool hk_get_headshot(void* thiz, void* source, void* data, void* method) {
@@ -2455,10 +2844,68 @@ static float hk_weapon_get_attack_speed(void* thiz, void* method) {
 
 static bool hk_weapon_get_through_wall(void* thiz, void* method) {
     bump(g_hit_always_walls);
+    bool original = g_orig_weapon_get_through_wall ? g_orig_weapon_get_through_wall(thiz, method) : false;
     if (!g_enable_shoot_through_walls) {
-        return g_orig_weapon_get_through_wall ? g_orig_weapon_get_through_wall(thiz, method) : false;
+        return original;
     }
+    force_weapon_data_through_wall(thiz);
     return true;
+}
+
+static bool hk_weapon_get_through_inside_wall(void* thiz, void* method) {
+    bump(g_hit_always_inside_walls);
+    bool original = g_orig_weapon_get_through_inside_wall
+        ? g_orig_weapon_get_through_inside_wall(thiz, method)
+        : false;
+    if (!g_enable_shoot_through_walls) {
+        return original;
+    }
+    force_weapon_data_through_wall(thiz);
+    return true;
+}
+
+static bool hk_bullet_transmit_get_through_wall(void* thiz, void* method) {
+    bump(g_hit_bullet_transmit_wall_get);
+    bool original = g_orig_bullet_transmit_get_through_wall
+        ? g_orig_bullet_transmit_get_through_wall(thiz, method)
+        : false;
+    if (!g_enable_shoot_through_walls) return original;
+    force_bullet_transmit_through_wall(thiz);
+    return true;
+}
+
+static void* hk_bullet_transmit_init_simple(void* thiz, void* entity, int32_t bullet_id, bool clear, float final_hit_ratio, void* method) {
+    void* result = g_orig_bullet_transmit_init_simple
+        ? g_orig_bullet_transmit_init_simple(thiz, entity, bullet_id, clear, final_hit_ratio, method)
+        : thiz;
+    apply_hero_bullet_runtime_wall(result, entity, true);
+    return result;
+}
+
+static void* hk_bullet_transmit_init_full(void* thiz, void* entity, int32_t bullet_id, float attack_ratio, float back_ratio, int32_t through_enemy, float through_ratio, bool clear, float final_hit_ratio, void* method) {
+    void* result = g_orig_bullet_transmit_init_full
+        ? g_orig_bullet_transmit_init_full(thiz, entity, bullet_id, attack_ratio, back_ratio, through_enemy, through_ratio, clear, final_hit_ratio, method)
+        : thiz;
+    apply_hero_bullet_runtime_wall(result, entity, true);
+    return result;
+}
+
+static void hk_bulletbase_hit_wall(void* thiz, void* collider, void* method) {
+    apply_hero_bulletbase_runtime_wall(thiz);
+    if (is_hero_bullet_base(thiz)) {
+        bump(g_hit_bullet_hitwall_bypass);
+        return;
+    }
+    if (g_orig_bulletbase_hit_wall) g_orig_bulletbase_hit_wall(thiz, collider, method);
+}
+
+static void hk_bulletbase_hitwall_internal(void* thiz, void* state, void* method) {
+    apply_hero_bulletbase_runtime_wall(thiz);
+    if (is_hero_bullet_base(thiz)) {
+        bump(g_hit_bullet_hitwall_internal_bypass);
+        return;
+    }
+    if (g_orig_bulletbase_hitwall_internal) g_orig_bulletbase_hitwall_internal(thiz, state, method);
 }
 
 static void hk_entitybase_set_fly_water(void* thiz, bool value, void* method) {
@@ -2504,7 +2951,6 @@ static void hk_entitybase_set_collider(void* thiz, bool value, void* method) {
 static void hk_entitybase_set_fly_all(void* thiz, bool value, void* method) {
     bool hero = is_hero_entity_base(thiz);
     bool forced = hero && (g_enable_walk_through_water || g_enable_walk_through_walls);
-    if (forced && g_enable_walk_through_walls) value = true;
     if (g_orig_entitybase_set_fly_all) g_orig_entitybase_set_fly_all(thiz, value, method);
     if (forced) apply_hero_traversal_runtime(thiz);
 }
@@ -2513,7 +2959,6 @@ static Vector3Lite hk_entitybase_check_pos(void* thiz, Vector3Lite pos, void* me
     if ((g_enable_walk_through_water || g_enable_walk_through_walls) && is_hero_entity_base(thiz)) {
         apply_hero_traversal_runtime(thiz);
         bump(g_hit_walk_check_pos);
-        return pos;
     }
     return g_orig_entitybase_check_pos ? g_orig_entitybase_check_pos(thiz, pos, method) : pos;
 }
@@ -2535,20 +2980,197 @@ static void hk_entityhitctrl_set_fly_one(void* thiz, void* layer, bool value, vo
     if (forced) set_hero_traversal_flags_direct(entity_base);
 }
 
+static float float_from_bits(uint32_t bits) {
+    float value = 0.0f;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+static uint32_t bits_from_float(float value) {
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+static Vector3Lite decrypt_obscured_vector3(uintptr_t obscured) {
+    uint32_t key = static_cast<uint32_t>(
+        *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_key)
+    );
+    uint32_t hidden_x = static_cast<uint32_t>(
+        *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden)
+    );
+    uint32_t hidden_y = static_cast<uint32_t>(
+        *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t))
+    );
+    uint32_t hidden_z = static_cast<uint32_t>(
+        *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t) * 2)
+    );
+    return {
+        float_from_bits(hidden_x ^ key),
+        float_from_bits(hidden_y ^ key),
+        float_from_bits(hidden_z ^ key),
+    };
+}
+
+static void encrypt_obscured_vector3(uintptr_t obscured, const Vector3Lite& value) {
+    uint32_t key = static_cast<uint32_t>(
+        *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_key)
+    );
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden) =
+        static_cast<int32_t>(bits_from_float(value.x) ^ key);
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t)) =
+        static_cast<int32_t>(bits_from_float(value.y) ^ key);
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t) * 2) =
+        static_cast<int32_t>(bits_from_float(value.z) ^ key);
+
+    volatile uint8_t* fake_active = reinterpret_cast<volatile uint8_t*>(
+        obscured + g_off_obscured_vector3_fake_active
+    );
+    if (*fake_active) {
+        *reinterpret_cast<Vector3Lite*>(obscured + g_off_obscured_vector3_fake) = value;
+    }
+}
+
+static void save_obscured_vector3(uintptr_t obscured, ObscuredVector3Snapshot* snapshot) {
+    snapshot->key = *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_key);
+    snapshot->hidden_x = *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden);
+    snapshot->hidden_y = *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t));
+    snapshot->hidden_z = *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t) * 2);
+    snapshot->inited = *reinterpret_cast<volatile uint8_t*>(obscured + g_off_obscured_vector3_inited);
+    snapshot->fake = *reinterpret_cast<Vector3Lite*>(obscured + g_off_obscured_vector3_fake);
+    snapshot->fake_active = *reinterpret_cast<volatile uint8_t*>(obscured + g_off_obscured_vector3_fake_active);
+}
+
+static void restore_obscured_vector3(uintptr_t obscured, const ObscuredVector3Snapshot& snapshot) {
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_key) = snapshot.key;
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden) = snapshot.hidden_x;
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t)) = snapshot.hidden_y;
+    *reinterpret_cast<volatile int32_t*>(obscured + g_off_obscured_vector3_hidden + sizeof(int32_t) * 2) = snapshot.hidden_z;
+    *reinterpret_cast<volatile uint8_t*>(obscured + g_off_obscured_vector3_inited) = snapshot.inited;
+    *reinterpret_cast<Vector3Lite*>(obscured + g_off_obscured_vector3_fake) = snapshot.fake;
+    *reinterpret_cast<volatile uint8_t*>(obscured + g_off_obscured_vector3_fake_active) = snapshot.fake_active;
+}
+
+static bool read_move_progress_direction(void* move_control,
+                                         ObscuredVector3Snapshot* snapshot,
+                                         Vector3Lite* direction,
+                                         float* magnitude) {
+    if (!g_field_offsets_ready || !move_control || !snapshot || !direction || !magnitude) return false;
+    uintptr_t obscured = reinterpret_cast<uintptr_t>(move_control) + g_off_move_control_move_direction;
+    save_obscured_vector3(obscured, snapshot);
+
+    *direction = decrypt_obscured_vector3(obscured);
+    *magnitude = sqrtf(direction->x * direction->x + direction->y * direction->y + direction->z * direction->z);
+    g_last_move_progress_speed = *magnitude;
+    if (!isfinite(*magnitude) || *magnitude <= 0.001f ||
+        !isfinite(direction->x) || !isfinite(direction->y) || !isfinite(direction->z)) {
+        g_last_move_progress_scaled = *magnitude;
+        return false;
+    }
+    return true;
+}
+
+static bool write_move_progress_direction_scaled(void* move_control,
+                                                 const Vector3Lite& direction,
+                                                 float scale) {
+    if (!g_field_offsets_ready || !move_control || scale <= 0.0f || !isfinite(scale)) return false;
+    Vector3Lite scaled = {
+        static_cast<float>(static_cast<double>(direction.x) * static_cast<double>(scale)),
+        static_cast<float>(static_cast<double>(direction.y) * static_cast<double>(scale)),
+        static_cast<float>(static_cast<double>(direction.z) * static_cast<double>(scale)),
+    };
+    if (!isfinite(scaled.x) || !isfinite(scaled.y) || !isfinite(scaled.z)) {
+        return false;
+    }
+
+    uintptr_t obscured = reinterpret_cast<uintptr_t>(move_control) + g_off_move_control_move_direction;
+    encrypt_obscured_vector3(obscured, scaled);
+    return true;
+}
+
+static void hk_movecontrol_update_progress(void* thiz, void* method) {
+    bump(g_hit_move_progress_get);
+    if (!g_orig_movecontrol_update_progress) return;
+
+    void* entity_base = get_entity_base_from_move_control(thiz);
+    bool hero = is_hero_entity_base(entity_base);
+    if (hero) bump(g_hit_move_progress_hero);
+
+    const float multiplier = clamp_move_speed(g_move_speed_multiplier);
+    if (!g_enable_move_speed || !hero || multiplier == 1.0f) {
+        bump(g_hit_move_progress_passthrough);
+        g_orig_movecontrol_update_progress(thiz, method);
+        return;
+    }
+
+    ObscuredVector3Snapshot snapshot{};
+    Vector3Lite direction{};
+    float magnitude = 0.0f;
+    bool readable = read_move_progress_direction(thiz, &snapshot, &direction, &magnitude);
+    if (!readable) {
+        bump(g_hit_move_progress_passthrough);
+        g_orig_movecontrol_update_progress(thiz, method);
+        return;
+    }
+
+    g_last_move_progress_scaled = magnitude * multiplier;
+    bump(g_hit_move_progress_apply);
+    int32_t whole_steps = static_cast<int32_t>(floorf(multiplier));
+    if (whole_steps < 0) whole_steps = 0;
+    if (whole_steps > kMoveProgressMaxSubsteps) whole_steps = kMoveProgressMaxSubsteps;
+    float fractional_step = multiplier - static_cast<float>(whole_steps);
+    if (fractional_step < kMoveProgressFractionEpsilon) fractional_step = 0.0f;
+
+    int32_t applied_steps = 0;
+    if (whole_steps <= 0) {
+        if (write_move_progress_direction_scaled(thiz, direction, multiplier)) {
+            g_orig_movecontrol_update_progress(thiz, method);
+            applied_steps = 1;
+        }
+    } else {
+        for (int32_t i = 0; i < whole_steps; ++i) {
+            if (!write_move_progress_direction_scaled(thiz, direction, 1.0f)) break;
+            g_orig_movecontrol_update_progress(thiz, method);
+            ++applied_steps;
+        }
+        if (fractional_step > 0.0f &&
+            write_move_progress_direction_scaled(thiz, direction, fractional_step)) {
+            g_orig_movecontrol_update_progress(thiz, method);
+            ++applied_steps;
+        }
+    }
+    g_last_move_progress_steps = applied_steps;
+    if (applied_steps > 0) {
+        bump(g_hit_move_progress_substeps, static_cast<uint64_t>(applied_steps));
+    }
+    if (applied_steps == 0) {
+        g_orig_movecontrol_update_progress(thiz, method);
+    }
+    restore_obscured_vector3(
+        reinterpret_cast<uintptr_t>(thiz) + g_off_move_control_move_direction,
+        snapshot
+    );
+}
+
 static float hk_time_get_scale(void* method) {
     bump(g_hit_game_speed_get);
     if (!g_enable_game_speed) {
-        return g_orig_time_get_scale ? g_orig_time_get_scale(method) : 1.0f;
+        (void)method;
+        return 1.0f;
     }
     return clamp_game_speed(g_game_speed_multiplier);
 }
 
 static void hk_time_set_scale(float value, void* method) {
     bump(g_hit_game_speed_set);
+    if (!g_enable_game_speed) {
+        (void)value;
+        (void)method;
+        return;
+    }
     if (!g_orig_time_set_scale) return;
-    float next = g_enable_game_speed ? clamp_game_speed(g_game_speed_multiplier) : value;
-    if (g_enable_game_speed) bump(g_hit_game_speed_apply);
-    g_orig_time_set_scale(next, method);
+    bump(g_hit_game_speed_apply);
+    g_orig_time_set_scale(clamp_game_speed(g_game_speed_multiplier), method);
 }
 
 static bool is_gold_drop_type(int32_t type) {
@@ -2625,7 +3247,6 @@ static StaticIntFn g_orig_get_box_drop_gold = nullptr;
 static StaticIntArgFn g_orig_get_box_choose_gold = nullptr;
 static InstanceFloatFn g_orig_drop_gold_percent = nullptr;
 static IntObjArgFn g_orig_drop_model_get_drop_gold = nullptr;
-static InstanceIntFn g_orig_dead_good_get_gold_num = nullptr;
 static StaticBoolFn g_orig_can_save_gold_realtime = nullptr;
 static DeadGoodStartDropFn g_orig_dead_good_start_drop = nullptr;
 static ListReturnLongArgFn g_orig_drop_gold_hitted_list = nullptr;
@@ -2730,12 +3351,6 @@ static int32_t hk_drop_model_get_drop_gold(void* thiz, void* list, void* method)
     return g_gold_drop_scalar ? scale_int32(result, g_gold_multiplier) : result;
 }
 
-static int32_t hk_dead_good_get_gold_num(void* thiz, void* method) {
-    bump(g_hit_drop_scalar);
-    int32_t result = g_orig_dead_good_get_gold_num ? g_orig_dead_good_get_gold_num(thiz, method) : 0;
-    return g_gold_drop_scalar ? scale_int32(result, g_gold_multiplier) : result;
-}
-
 static bool hk_can_save_gold_realtime(void* method) {
     if (g_gold_save_realtime) return true;
     return g_orig_can_save_gold_realtime ? g_orig_can_save_gold_realtime(method) : false;
@@ -2823,7 +3438,6 @@ using MaxDropIdFn = int32_t (*)(void*, int32_t, void*);
 
 static LayerGoldPercentFn g_orig_stage_level_gold_percent = nullptr;
 static MaxDropFn g_orig_stage_level_free_gold = nullptr;
-static MaxDropFn g_orig_adventure_coin_max_drop = nullptr;
 static MaxDropFn g_orig_bag_coin_max_drop = nullptr;
 
 static float hk_stage_level_gold_percent(void* thiz, int32_t layer, void* method) {
@@ -2836,14 +3450,6 @@ static int32_t hk_stage_level_free_gold(void* thiz, void* method) {
     bump(g_hit_ratio);
     int32_t result = g_orig_stage_level_free_gold ? g_orig_stage_level_free_gold(thiz, method) : 0;
     return g_gold_ratio_scale ? scale_int32(result, g_gold_multiplier) : result;
-}
-
-static int32_t hk_adventure_coin_max_drop(void* thiz, void* method) {
-    bump(g_hit_max_drop);
-    int32_t result = g_orig_adventure_coin_max_drop ? g_orig_adventure_coin_max_drop(thiz, method) : 0;
-    if (!g_max_drop_cap_patch) return result;
-    int32_t cap = clamp_max_gold_cap(g_max_gold_cap_value);
-    return result < cap ? cap : result;
 }
 
 static int32_t hk_bag_coin_max_drop(void* thiz, void* method) {
@@ -3561,6 +4167,7 @@ static void* hack_thread(void*) {
          g_il2cpp_metadata_ready ? 1 : 0,
          g_il2cpp_metadata_wait_ms);
 
+    resolve_runtime_field_offsets();
     resolve_traversal_helpers(il2cpp_base);
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
@@ -3569,6 +4176,12 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_Speed, hk_weapon_get_speed, g_orig_weapon_get_speed);
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_AttackSpeed, hk_weapon_get_attack_speed, g_orig_weapon_get_attack_speed);
     HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_bThroughWall, hk_weapon_get_through_wall, g_orig_weapon_get_through_wall);
+    HOOK_FN(il2cpp_base, rva::TableTool_Weapon_weapon_get_bThroughInsideWall, hk_weapon_get_through_inside_wall, g_orig_weapon_get_through_inside_wall);
+    HOOK_FN(il2cpp_base, rva::BulletTransmit_Init_Simple, hk_bullet_transmit_init_simple, g_orig_bullet_transmit_init_simple);
+    HOOK_FN(il2cpp_base, rva::BulletTransmit_Init_Full, hk_bullet_transmit_init_full, g_orig_bullet_transmit_init_full);
+    HOOK_FN(il2cpp_base, rva::BulletTransmit_get_ThroughWall, hk_bullet_transmit_get_through_wall, g_orig_bullet_transmit_get_through_wall);
+    HOOK_FN(il2cpp_base, rva::BulletBase_HitWall, hk_bulletbase_hit_wall, g_orig_bulletbase_hit_wall);
+    HOOK_FN(il2cpp_base, rva::BulletBase_TriggerEnter1_HitWallInternal, hk_bulletbase_hitwall_internal, g_orig_bulletbase_hitwall_internal);
     HOOK_FN(il2cpp_base, rva::EntityBase_SetFlyWater, hk_entitybase_set_fly_water, g_orig_entitybase_set_fly_water);
     HOOK_FN(il2cpp_base, rva::EntityBase_GetFlyWater, hk_entitybase_get_fly_water, g_orig_entitybase_get_fly_water);
     HOOK_FN(il2cpp_base, rva::EntityBase_SetFlyStone, hk_entitybase_set_fly_stone, g_orig_entitybase_set_fly_stone);
@@ -3578,6 +4191,7 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::EntityBase_CheckPos, hk_entitybase_check_pos, g_orig_entitybase_check_pos);
     HOOK_FN(il2cpp_base, rva::EntityBase_AddInitSkills, hk_entitybase_add_init_skills, g_orig_entitybase_add_init_skills);
     HOOK_FN(il2cpp_base, rva::EntityHitCtrl_SetFlyOne, hk_entityhitctrl_set_fly_one, g_orig_entityhitctrl_set_fly_one);
+    HOOK_FN(il2cpp_base, rva::MoveControl_UpdateProgress, hk_movecontrol_update_progress, g_orig_movecontrol_update_progress);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
     g_startup_hooks_ready = true;
