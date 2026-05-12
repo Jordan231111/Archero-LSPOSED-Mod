@@ -17,14 +17,16 @@ Signer #1 certificate SHA-256:
 c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d
 ```
 
-Current verified 7.9.1 output:
+Current rebuilt 7.9.1 output:
 
 ```text
 /Users/jordan/Documents/temp/archerodecompiled/dist/lspatch_archero_7.9.1_xapk/archero_7.9.1_lspatched_full.apks
-SHA-256: 7734f2001607b50baec30385ccd97a625736a7ea783818b126d2dad9de0f77c9
-Embedded module: assets/lspatch/modules/com.archero.mod.apk, 273042 bytes
+SHA-256: 6482d9a238e44d84541e42b74205e90a5a2d3b6c0a0b29252f4b4d9474730961
+Embedded module: assets/lspatch/modules/com.archero.mod.apk, 281098 bytes
 Split signing digest: c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d
 ```
+
+The full `.apks` archive and Unity asset splits are intentionally local build artifacts. They exceed normal GitHub per-file limits, so `dist/` stays ignored and the archive should be rebuilt from this guide when needed.
 
 ## Inputs
 
@@ -269,4 +271,4 @@ You can also install the `.apks` archive with a split APK installer such as SAI,
 
 Game starts but hangs before loading usually means required Unity asset splits are missing. Verify the XAPK `manifest.json` `split_apks` list and make sure each listed APK is present in `$OUT/apks`.
 
-Game starts but the module does not work usually means the game internals changed. Re-check IL2CPP metadata/RVAs and update the module before rebuilding the LSPatch package.
+Game starts but the module does not work usually means the game internals changed. Re-check IL2CPP metadata class/method/field names and update the module before rebuilding the LSPatch package. The current module fails closed when metadata cannot resolve a target; it does not use fixed field-offset or direct-RVA runtime fallbacks.

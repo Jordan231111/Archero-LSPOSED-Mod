@@ -11,21 +11,20 @@ The v7.9.1 Archero files in `diffwork/archero_7_9_1/input` are normal Android IL
 
 ## Recommendation
 
-Use this stack, in this order:
+Use this runtime policy:
 
 1. IL2CPP metadata/runtime API name resolution.
-2. AOB signatures for the small set of high-value hooks.
-3. String-xref anchors where there is a durable literal, especially Unity icall wrappers like `UnityEngine.Time::get_timeScale()`.
-4. Legacy RVA only as the last compatibility fallback.
-5. Runtime dumpers as operator fallback for protected updates, not as the normal launch path.
+2. Metadata-resolved game field offsets for every object field the module reads or writes.
+3. Fail closed when a method, helper, or field cannot be identified.
+4. Runtime dumpers as operator tooling for protected updates, not as the normal launch path.
 
-This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, `field_resolver.metadata`, `field_resolver.fallback`, `field_resolver.fail`, `field_offsets_ready`, and direct-patch counters. There is no Lua loader or Lua file in this flow.
+This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same metadata resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, `field_resolver.metadata`, `field_resolver.fallback`, `field_resolver.fail`, `field_offsets_ready`, and direct-patch counters. There is no Lua loader or Lua file in this flow. The AOB/xref/RVA counters are retained for status compatibility and should stay at zero in this metadata-only build.
 
 ## Technique Survey
 
 **Byte / AOB signatures in `libil2cpp.so`**
 
-Pros: works without metadata names, survives ASLR, useful when names are stripped/obfuscated, easy to cache per hook. Cons: sensitive to compiler output, Unity version, optimization changes, and branch/call target movement. For ARM64 IL2CPP, wildcard PC-relative and relocation-sensitive instructions: `ADRP`, `ADD` forming addresses, `LDR` from global tables, `B/BL`, and conditional branches if the compiler may reorder blocks. Prefer 24-64 bytes around stable data-flow or field offsets, not just function prologues. Validate uniqueness over executable ranges and reject ambiguous matches. If compiler reordering changes a function body, move the signature to an invariant sub-block or replace it with metadata/xref.
+Pros: works without metadata names, survives ASLR, useful when names are stripped/obfuscated, easy to cache per hook. Cons: sensitive to compiler output, Unity version, optimization changes, and branch/call target movement. For ARM64 IL2CPP, wildcard PC-relative and relocation-sensitive instructions: `ADRP`, `ADD` forming addresses, `LDR` from global tables, `B/BL`, and conditional branches if the compiler may reorder blocks. Prefer 24-64 bytes around stable data-flow, not just function prologues. Validate uniqueness over executable ranges and reject ambiguous matches. The current module keeps scanner code only as research scaffolding; runtime hook installation does not fall back to AOB signatures.
 
 **IL2CPP metadata-driven resolution**
 
@@ -33,7 +32,7 @@ Pros: best normal path for this target. Class and method names are much more sta
 
 **String-xref anchoring**
 
-Pros: stable when a unique string is retained, especially Unity icall names, logging strings, error strings, and format strings. Cons: not every gameplay method has a durable literal; ARM64 xref recovery must decode `ADRP/ADD` or literal loads; strings can move or be stripped. This module implements an ARM64 `ADRP+ADD` string-xref fallback and enables it for `UnityEngine.Time.timeScale` wrappers.
+Pros: stable when a unique string is retained, especially Unity icall names, logging strings, error strings, and format strings. Cons: not every gameplay method has a durable literal; ARM64 xref recovery must decode `ADRP/ADD` or literal loads; strings can move or be stripped. The current module keeps ARM64 string-xref scanner code only as research scaffolding; runtime hook installation does not fall back to string xrefs.
 
 **Vtable / RGCTX index resolution**
 
@@ -45,14 +44,14 @@ Pros: trivial and robust for exported IL2CPP API functions and native plugin exp
 
 **Runtime dumpers**
 
-Pros: strongest fallback for protected or encrypted updates. Cons: operational cost, root/frida requirements, first-launch delay, and more moving parts. Current practical choices:
+Pros: strongest operator path for protected or encrypted updates. Cons: operational cost, root/frida requirements, first-launch delay, and more moving parts. Current practical choices:
 
 - Il2CppDumper: still useful offline; supports ELF/ELF64 and Android memory-dumped `libil2cpp.so`, with command-line use `Il2CppDumper.exe <executable-file> <global-metadata> <output-directory>`.
 - Il2CppInspectorRedux: better static analysis output for newer metadata versions and JSON/address-map workflows; useful for regenerating a hook spec table after big updates.
-- Zygisk-Il2CppDumper: best protected-Android fallback on rooted devices because it dumps at runtime and is designed to bypass protection/encryption/obfuscation.
-- frida-il2cpp-bridge: best interactive fallback; can dump, trace, intercept, and replace IL2CPP calls at runtime without needing `global-metadata.dat`.
+- Zygisk-Il2CppDumper: best protected-Android option on rooted devices because it dumps at runtime and is designed to bypass protection/encryption/obfuscation.
+- frida-il2cpp-bridge: best interactive option; can dump, trace, intercept, and replace IL2CPP calls at runtime without needing `global-metadata.dat`.
 
-For this module, runtime dumpers should stay outside the normal launch path. If a protected update defeats metadata/AOB/xref resolution, invoke a runtime dumper from the operator environment, generate fresh `dump.cs`/JSON/script output, then update the native `HookSpec` table only where names changed.
+For this module, runtime dumpers should stay outside the normal launch path. If a protected update defeats metadata resolution, invoke a runtime dumper from the operator environment, generate fresh `dump.cs`/JSON/script output, then update the native `HookSpec` table only where names changed.
 
 ## Hybrid Pseudocode
 
@@ -61,16 +60,10 @@ wait until libil2cpp.so is mapped
 sleep only the minimum bootstrap settle window currently configured as 2000 ms
 resolve IL2CPP exports from the loaded module with dl_iterate_phdr
 poll every 250 ms until il2cpp_domain_get_assemblies(nullptr, &count) + EntityData.GetHeadShot resolve
-stop polling at 30000 ms; if metadata is still unavailable, continue with AOB/xref/RVA fallbacks and log the timeout
+stop polling at 30000 ms; if metadata is still unavailable, log the timeout and do not install gameplay hooks
 
 for each hook:
   target = resolve_metadata(namespace, class, method, arg_count, param_type)
-  if not executable(target):
-    target = scan_unique_aob(pattern)
-  if not executable(target):
-    target = find_string(anchor); find_aarch64_adrp_add_xref(anchor); walk_to_function_start()
-  if not executable(target):
-    target = libil2cpp_base + legacy_rva
   if not executable(target):
     log resolver.last_error and skip hook
   else:
@@ -79,12 +72,12 @@ for each hook:
 
 ## Files Changed
 
-- `archero_mod/app/src/main/cpp/mod.cpp`: native resolver stack, hook spec table, readiness-based metadata wait, AOB scanner, string-xref scanner, always-on gameplay hooks, status counters.
+- `archero_mod/app/src/main/cpp/mod.cpp`: metadata resolver stack, hook spec table, readiness-based metadata wait, research-only AOB/string-xref scanners, always-on gameplay hooks, status counters.
 - `archero_mod/app/src/main/cpp/CMakeLists.txt`: links `dl` for `dlopen`/`dlsym`.
 
 ## Current Always-On Startup Hooks
 
-The default startup set is metadata-first and falls back to AOB/xref/RVA only if metadata name resolution fails:
+The default startup set is metadata-only. Every method target and game field offset resolves through IL2CPP metadata; unresolved targets fail closed:
 
 - `EntityData.GetHeadShot`: headshot behavior for non-hero targets.
 - `EntityData.GetMiss`: godmode behavior for the hero.
@@ -98,7 +91,8 @@ The default startup set is metadata-first and falls back to AOB/xref/RVA only if
 - Smart should normally show in the acquired-skills UI because it is a regular visible slot skill (`Skill_Smart_Rate = "SlotSkill_1000041%"`). Greed is runtime-confirmed as accepted (`ContainsSkill(1000040)=true`) and backed by `TableTool.Skill_greedyskill`, but that separate table path can keep it out of the regular acquired-skills display.
 - `EntityBase.SetFlyWater`, `EntityBase.GetFlyWater`, `EntityBase.SetFlyStone`, `EntityBase.SetFlyAll`, `EntityBase.get_OnCalCanMove`, `EntityBase.SetCollider`, `EntityBase.check_pos`, and `EntityHitCtrl.SetFlyOne`: force only the hero's traversal state while preserving map generation.
 - Direct hero state mirroring: sets `EntityBase.bFlyWater`, `EntityBase.bFlyStone`, `EntityBase.move_layermask`, and the valid `EntityBase.m_EntityData` fly counters (`mFlyWaterCount`, `mFlyStoneCount`) after resolving the hero instance. The module does not hook `EntityData.IsFlyWater` or `EntityData.IsFlyStone`; direct getter hooks were rejected after crash triage.
-- `MoveControl.UpdateProgress`: config-gated hero-only movement scaling by running extra original movement substeps against a temporarily scaled `MoveControl.MoveDirection`, then restoring the original `ObscuredVector3` value.
+- `MoveControl.UpdateProgress`: config-gated hero-only movement scaling. Multipliers above `1.0x` call the original update once and then apply extra distance through `EntityBase.SelfMoveBy(Vector3)` using `UnityEngine.Time.get_deltaTime`; multipliers below `1.0x` temporarily scale `MoveControl.MoveDirection` for one original call, then restore the original `ObscuredVector3` value.
+- Rewarded ad callbacks: `AdCallbackControl`, `AdsRequestHelper.rewarded_high_eCPM_*`, `ALMaxRewardedDriver`, and `WrappedAdapter` load/show paths can complete the app's reward/close callbacks directly when `skip_rewarded_ads=1`.
 - `UnityEngine.Time.get_timeScale` and `set_timeScale`: forced game speed, default multiplier `4.0`.
 
 The resolver is intentionally not used to force game-over server validation. The static dump shows transaction IDs, server-drop structures, cached game-over packets, and client-side cheat reporting around settlement. For an owned backend, update the server-side settlement rules to accept the desired skill/reward policy instead of adding client-side packet-forcing behavior.
@@ -112,12 +106,13 @@ Verified on the connected Android device after installing the rebuilt debug APK 
 - `il2cpp_metadata_ready=1`, `startup_hooks_ready=1`, `il2cpp_metadata_wait_ms=2000`.
 - First traversal implementation used `MapCreator.DealWater`, `MapCreator.DealTrap`, and `MapCreator.CreateGoodNotTrap`; that was rejected because it removed walls/water and also suppressed stage objects such as angels and item shops.
 - Current traversal implementation no longer hooks `MapCreator` at all.
-- `hook_installed_count=25`.
-- `resolver.metadata=27`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions are the direct-call helpers `EntityBase.AddSkill(int)` and `EntityBase.ContainsSkill(int)`, which are called for battle-skill injection/confirmation instead of being hooked.
-- `field_resolver.metadata=25`, `field_resolver.fallback=0`, `field_resolver.fail=0`, `field_offsets_ready=1`.
-- Status confirmed all 25 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, the movement hook, the shoot-through-wall stack, and the Unity timeScale hooks.
+- `hook_installed_count=35`.
+- `resolver.metadata=47`, `resolver.aob=0`, `resolver.xref=0`, `resolver.rva=0`, `resolver.fail=0`. The extra metadata resolutions include direct-call helpers for battle-skill injection/confirmation, movement extra distance, and rewarded-ad callback completion.
+- `field_resolver.metadata=30`, `field_resolver.fallback=0`, `field_resolver.fail=0`, `field_offsets_ready=1`. The metadata-resolved fields include movement, traversal, bullet/weapon, `ObscuredVector3`, and rewarded-ad private callback/storage fields.
+- Status confirmed all 35 startup hooks installed through metadata, including `EntityBase.AddInitSkills`, the hero traversal hooks, the movement hook, the rewarded-ad bypass hooks, the shoot-through-wall stack, and the Unity timeScale hooks.
 - Final speed defaults were device-confirmed: `attack_speed_value=100.000000` and `game_speed_multiplier=4.000000`.
-- Hero movement speed was device-confirmed through `MoveControl.UpdateProgress` status counters with the test config set to `move_speed_multiplier=10`.
+- Hero movement speed installation was device-confirmed with the test config set to `move_speed_multiplier=10`; the current implementation avoids re-entering `MoveControl.UpdateProgress` and uses `EntityBase.SelfMoveBy` for extra distance.
+- Rewarded-ad skip was device-confirmed from the Hero Patrol "Extra Earnings" placement: tapping the placement stayed in `com.habby.archero/.UnityPlayerActivity`, and status showed `hits.ad_skip_driver=2`, `hits.ad_skip_reward=2`, and `hits.ad_skip_close=2`.
 - Shoot-through-wall was device-confirmed on the live bullet collision path: `hits.weapon_wall_field_apply=1873`, `hits.runtime_walls_apply=65`, `hits.runtime_walls_init=1582`, and `hits.bullet_hitwall_internal_bypass=65`. `hits.bullet_transmit_wall_get=0` and `hits.bullet_hitwall_bypass=0` simply mean the live run used the internal `TriggerEnter1` wall handler rather than those backup paths.
 - After battle entry on the Greed/Smart rebuilt APK, status showed `hits.skill_inject_greed=1`, `hits.skill_confirm_greed=1`, `hits.skill_inject_smart=1`, and `hits.skill_confirm_smart=1`, confirming both IDs were accepted by `EntityBase.ContainsSkill(int)` in the running game. `hits.skill_confirm_fail=0`.
 - The water skill-list confirmation remained false (`hits.skill_confirm_water=0`), but the traversal path remained active through the previously validated direct state path: `hits.walk_skill_inject=1`, `hits.walk_runtime_apply=1`, and `hits.walk_entitydata_apply=2`.

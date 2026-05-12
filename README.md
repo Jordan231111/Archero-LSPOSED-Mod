@@ -10,9 +10,10 @@ LSPosed/Xposed module for Archero (com.habby.archero) providing native IL2CPP ga
 - **Godmode:** Player is invincible (forced miss on Hero entities)
 - **Always-on battle skill injection:** Water walk, Greed, and Smart are injected through metadata-resolved `EntityBase.AddSkill(int)` at battle init and confirmed with `EntityBase.ContainsSkill(int)` where the game tracks that skill ID family.
 - **Shoot through walls:** Hero projectile setup forces weapon through-wall fields and `BulletTransmit.ThroughWall`; hero bullet wall-collision handlers are bypassed so walls do not despawn the projectile.
-- **Speed defaults:** Attack speed is forced to `100.0`; game speed defaults to `4.0x`; hero movement speed is configurable through `MoveControl.UpdateProgress` substeps.
+- **Speed defaults:** Attack speed is forced to `100.0`; game speed defaults to `4.0x`; hero movement speed is configurable. The movement hook calls `MoveControl.UpdateProgress` once, then applies extra hero distance through the game's `EntityBase.SelfMoveBy` path for multipliers above `1.0x`.
+- **Rewarded ad bypass:** Rewarded ad load/show paths can be completed immediately through the app's own reward/close callbacks instead of opening the ad activity.
 - **Traversal:** Hero-only water/wall traversal state is mirrored without hooking map generation, preserving walls, water, shops, and angels.
-- **Runtime resolution:** Methods and field offsets resolve by IL2CPP metadata first, then fall back to AOB/xref/RVA or validated offset constants where available.
+- **Runtime resolution:** Methods and game field offsets resolve through IL2CPP metadata and fail closed if a target cannot be identified. v7.9.1 RVAs remain in the source as dump/spec anchors only; runtime hook install does not fall back to fixed field offsets or direct RVA addresses.
 
 Side-aware logic matches the original mod behavior: only the appropriate side receives the forced result.
 

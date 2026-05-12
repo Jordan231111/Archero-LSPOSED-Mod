@@ -88,7 +88,9 @@ game_speed_multiplier=4
 
 # move_speed
 # Config-gated hero-only movement scaling through MoveControl.UpdateProgress.
-# 1 applies extra hero movement substeps. 0 passes movement through unchanged.
+# For multipliers above 1, the hook calls UpdateProgress once and applies the extra distance with EntityBase.SelfMoveBy.
+# For multipliers below 1, it temporarily scales MoveDirection for one original UpdateProgress call.
+# 0 passes movement through unchanged.
 move_speed=1
 
 # move_speed_multiplier
@@ -96,6 +98,11 @@ move_speed=1
 # Range in native: 0.1 to 20. Default is 1.
 # Example: move_speed_multiplier=3
 move_speed_multiplier=1
+
+# skip_rewarded_ads
+# Completes rewarded ad callbacks immediately without showing the ad.
+# Covers AdCallbackControl, high-eCPM, ALMaxRewardedDriver, WrappedAdapter, and callback-router paths.
+skip_rewarded_ads=1
 
 # install_gold_hooks
 # Master switch for optional gold/material/drop hooks.
@@ -207,8 +214,8 @@ material_drop_repeat=0
 # max_drop_cap_patch
 # Enables max-drop cap hooks and the chapter/session loot-total bypass.
 # Normal chapters use concrete StageLevelManager caps; those are raised here too.
-# DropManager's per-chapter total counters are cleared while this is ON so repeated drops do not stop at the old run-wide limit.
-# DropManager.CanGetMoreDrop/getTotalCnt/AppendDropCount and LocalSave equip-drop gates are also relaxed.
+# DropManager.CanGetMoreDrop/getTotalCnt/AppendDropCount and LocalSave equip-drop gates are relaxed through metadata-resolved hooks.
+# The older fixed-offset DropManager total-counter write is disabled in this metadata-only build.
 # Item/material caps use max_drop_cap_value.
 # Gold/coin caps use max_gold_cap_value through concrete int32 hooks.
 # This is meant to keep local cap reads high enough for boosted drops.
