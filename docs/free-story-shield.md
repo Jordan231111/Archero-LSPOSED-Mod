@@ -2,26 +2,26 @@
 
 Target: `com.habby.archero` v7.9.1 (arm64-v8a), `libil2cpp.so`.
 
-This document describes the LSPosed module hooks added to silence the Free
-Story key-consumption flow. The implementation is the C++ translation of the
-findings written up in `free_story_findings.md` (attached to the original PR
-discussion) and adds no Lua- or RVA-pinned patching: each hook is resolved at
-runtime through IL2CPP metadata, with the v7.9.1 RVAs only kept as anchors
-for verification.
+This document describes the LSPosed module hooks added to zero-cost the Free
+Story key-consumption flow while preserving the battle-start transaction. The
+implementation is the C++ translation of the findings written up in
+`free_story_findings.md` (attached to the original PR discussion) and adds no
+Lua- or RVA-pinned patching: each hook is resolved at runtime through IL2CPP
+metadata, with the v7.9.1 RVAs only kept as anchors for verification.
 
 ## Goal
 
-Block Free Story plays from deducting the player's `Key` counter without
-producing any visible fingerprint relative to a no-op. The original Lua hack
-patched `GameLogic.GetModeLevelKey` to return `8`, which only changed the
-client-side prediction of how many Keys a play would cost; the server still
-saw the play and deducted the real cost. We instead intercept the actual
-flow:
+Block Free Story plays from deducting the player's `Key` counter while still
+letting the server observe a battle start so stage progression can persist.
+The original Lua hack patched `GameLogic.GetModeLevelKey` to return `8`,
+which only changed the client-side prediction of how many Keys a play would
+cost; the server still saw the play and deducted the real cost. We instead
+intercept the actual flow:
 
 ```
 EnterStoryBattle -> ... -> GameLogic.send_use_key ()
         |__ LocalSave.Modify_Key(-cost, false)    // predictive client-side decrement
-        |__ DispatchServerRequest(useKeyReq)      // tells server "I am playing"
+        |__ NetManager.SendInternal(CLifeTransPacket) // tells server "I am playing"
                 |__ server validates Vip.IsFreeStoryNumValid / IsCanFreeStoryToday
                 |__ server replies with authoritative Key
                 |__ DoLoginCallBack / Modify_Key path resyncs LocalSave.UserInfo.SetKey(value)
@@ -31,34 +31,38 @@ EnterStoryBattle -> ... -> GameLogic.send_use_key ()
 
 | Tier | Target                                   | v7.9.1 RVA   | Spec resolved at runtime via                                 | Default |
 |------|------------------------------------------|--------------|---------------------------------------------------------------|---------|
-| S.1  | `GameLogic.send_use_key()`               | `0x58CB67C`  | `class GameLogic` -> `method send_use_key`, 0 args            | **ON**  |
-| S.2a | `LocalSave.Modify_Key(long, bool)`       | `0x5A494C4`  | `class LocalSave` -> `method Modify_Key`, 2 args              | OFF     |
+| S.1a | `GameLogic.send_use_key()`               | `0x58CB67C`  | `class GameLogic` -> `method send_use_key`, 0 args            | **ON**  |
+| S.1b | `NetManager.SendInternal<object>()`      | `0x6842E28`  | generic instantiation anchor                                  | **ON**  |
+| S.2a | `LocalSave.Modify_Key(long, bool)`       | `0x5A494C4`  | `class LocalSave` -> `method Modify_Key`, 2 args              | scoped  |
 | S.2b | `LocalSave.UserInfo.SetKey(int)`         | `0x5B1E9E8`  | `class LocalSave.UserInfo` -> `method SetKey`, 1 arg          | OFF     |
 
 ### S.1 — `hk_send_use_key`
 
-Returns immediately when `free_story=1`. This skips:
+When `free_story=1`, calls the original `send_use_key()` under a scoped flag
+instead of returning early. The companion `NetManager.SendInternal<object>`
+hook sees the `CLifeTransPacket` created by that scoped call and rewrites:
 
-1. The local predictive `Modify_Key(-cost, false)` call inside `send_use_key`,
-   so the displayed Key value does not change.
-2. The outbound `DispatchServerRequest` packet, so the server never observes a
-   play in the first place and has nothing to deduct.
+```
+m_nMaterial: cost -> 0
+```
 
-Because both halves are skipped, the local view stays in lockstep with the
-server view: this is what makes the hook fingerprint-clean. There is no
-discrepancy for the server's `Vip.IsFreeStoryNumValid` resync to push back
-into the client.
+The same scoped flag blocks the local predictive `Modify_Key(-cost, false)`
+inside `send_use_key`, so the displayed Key value does not drop before the
+server replies.
+
+The earlier return-early strategy kept Key accounting clean but also prevented
+the server from seeing a battle-start life transaction. That allowed the local
+battle UI to advance temporarily, then login restored the old server stage.
 
 When `free_story=0`, the hook hits its passthrough path
 (`g_orig_send_use_key`) and the game behaves stock.
 
 ### S.2a — `hk_localsave_modify_key`
 
-Defense in depth. Only used when `free_story_skip_predictive=1`. Drops only
-negative deltas, so positive Key gains (ad refills, shop grants, login
-bootstrap) still apply. Useful only if a future code path other than
-`send_use_key` starts predictively decrementing Keys; otherwise S.1 already
-handles the predictive decrement because it lives inside `send_use_key`.
+Scoped core behavior plus defense in depth. With `free_story=1`, drops the
+negative delta made inside the active `send_use_key` call. When
+`free_story_skip_predictive=1`, also drops negative deltas outside that scoped
+path. Positive Key gains (ad refills, shop grants, login bootstrap) still pass.
 
 ### S.2b — `hk_userinfo_set_key`
 
@@ -70,9 +74,9 @@ pass through. The hook falls back to passthrough if the field offset failed
 to resolve, so a metadata regression cannot accidentally permanently freeze
 keys.
 
-This is intentionally OFF by default — with S.1 enabled there is no server
-deduction to resync from, so freezing writes would only hide legitimate
-adjustments.
+This is intentionally OFF by default. If the zero-cost transaction is accepted,
+there should be no server deduction to resync from, so freezing writes would
+only hide legitimate adjustments.
 
 ## Config keys
 
@@ -84,18 +88,21 @@ free_story_freeze_key=0
 free_story_skip_predictive=0
 ```
 
-The status file (`archero_mod_status.txt`) reports the same flags plus four
-hit counters and the resolved Key field offset:
+The status file (`archero_mod_status.txt`) reports the same flags, focused hit
+counters, the life-packet fields, and the resolved Key field offset:
 
 ```
 free_story=1
 free_story_freeze_key=0
 free_story_skip_predictive=0
 field_offsets.localsave_userinfo_key=0xb0
-hits.free_story_send_blocked=N
+hits.free_story_send_original=N
+hits.free_story_life_packet_zeroed=N
 hits.free_story_modify_blocked=N
 hits.free_story_set_key_blocked=N
 hits.free_story_passthrough=N
+last.free_story_life_material_before=N
+last.free_story_life_material_after=0
 ```
 
 ## Verification recipe
@@ -103,11 +110,14 @@ hits.free_story_passthrough=N
 After installing the module and starting a Free Story run from a save with a
 known Key count `K`:
 
-1. Confirm `hits.free_story_send_blocked` increments by 1 per play attempt.
-2. Confirm the displayed Key counter remains at `K`.
-3. Confirm no `useKey` request appears in the device proxy log.
-4. Disable the hook (`free_story=0`), restart Archero, and verify the counter
-   decrements and the request appears — i.e. only the hook changes behavior.
+1. Confirm `hits.free_story_send_original` increments by 1 per play attempt.
+2. Confirm `hits.free_story_life_packet_zeroed` increments and
+   `last.free_story_life_material_after=0`.
+3. Confirm the displayed Key counter remains at `K`.
+4. Finish the stage, force-close/relaunch, and confirm server-restored stage
+   progress remains advanced.
+5. Disable the hook (`free_story=0`), restart Archero, and verify the counter
+   decrements — i.e. only the hook changes behavior.
 
 ## Why not patch `GetModeLevelKey`?
 

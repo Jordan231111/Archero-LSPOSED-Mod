@@ -287,10 +287,12 @@ static constexpr uintptr_t LocalSave_BattleIn_CanDropEquip = 0x5A4FA98;
 static constexpr uintptr_t LocalSave_get_CanDropType501Equip = 0x5A5B448;
 static constexpr uintptr_t LocalSave_get_CanDropType401Or402Equip = 0x5A5B03C;
 static constexpr uintptr_t LocalSave_get_CanDropFirstEquip = 0x5A5B614;
-// Free Story shield: silence the outgoing key-consumption packet and (optionally)
-// shield the local Key state from authoritative resync writes. RVAs validated
+// Free Story shield: keep the battle-start life transaction alive while zeroing
+// its key material cost, then shield the local Key state from matching local
+// predictive decrements and optional authoritative resync writes. RVAs validated
 // against the 7.9.1 Il2CppDumper dump (see docs/free-story-shield.md).
 static constexpr uintptr_t GameLogic_send_use_key = 0x58CB67C;
+static constexpr uintptr_t NetManager_SendInternal_Object = 0x6842E28;
 static constexpr uintptr_t LocalSave_Modify_Key = 0x5A494C4;
 static constexpr uintptr_t LocalSave_UserInfo_SetKey = 0x5B1E9E8;
 }
@@ -355,14 +357,14 @@ static volatile bool g_enable_inject_smart_skill = true;
 static volatile bool g_enable_game_speed = true;
 static volatile bool g_enable_move_speed = true;
 static volatile bool g_skip_rewarded_ads = true;
-// Free Story shield (S.1): drop the outbound key-consumption packet entirely so
-// the server never observes the play and never deducts the player's Key.
+// Free Story shield (S.1): let the story battle-start transaction go out, but
+// zero its CLifeTransPacket material cost before NetManager sends it.
 static volatile bool g_enable_free_story = true;
 // Defensive co-hook (S.2 hook 2): refuse Key resync writes that would lower
-// the displayed Key. Off by default — S.1 keeps server-truth in sync already.
+// the displayed Key. Off by default so legitimate server refreshes stay visible.
 static volatile bool g_enable_free_story_freeze_key = false;
 // Defensive co-hook (S.2 hook 1): drop negative deltas into LocalSave.Modify_Key
-// so the client cannot predictively deduct ahead of the (skipped) server reply.
+// so the client cannot predictively deduct ahead of the server reply.
 static volatile bool g_enable_free_story_skip_predictive = false;
 static volatile bool g_install_gold_hooks = false;
 static volatile bool g_gold_hooks_installed = false;
@@ -467,9 +469,26 @@ static volatile uint64_t g_hit_ad_skip_reward = 0;
 static volatile uint64_t g_hit_ad_skip_close = 0;
 static volatile uint64_t g_hit_ad_skip_passthrough = 0;
 static volatile uint64_t g_hit_free_story_send_blocked = 0;
+static volatile uint64_t g_hit_free_story_send_original = 0;
+static volatile uint64_t g_hit_free_story_life_packet_zeroed = 0;
+static volatile uint64_t g_hit_free_story_life_packet_passthrough = 0;
 static volatile uint64_t g_hit_free_story_modify_blocked = 0;
+static volatile uint64_t g_hit_free_story_modify_passthrough = 0;
+static volatile uint64_t g_hit_free_story_set_key_lower_attempt = 0;
 static volatile uint64_t g_hit_free_story_set_key_blocked = 0;
+static volatile uint64_t g_hit_free_story_set_key_passthrough = 0;
 static volatile uint64_t g_hit_free_story_passthrough = 0;
+static volatile int64_t g_last_free_story_modify_delta = 0;
+static volatile int32_t g_last_free_story_modify_over = 0;
+static volatile int32_t g_last_free_story_set_key_current = 0;
+static volatile int32_t g_last_free_story_set_key_value = 0;
+static volatile int32_t g_last_free_story_set_key_had_offset = 0;
+static volatile int32_t g_last_free_story_life_sendtype = 0;
+static volatile int32_t g_last_free_story_life_material_before = 0;
+static volatile int32_t g_last_free_story_life_material_after = 0;
+static volatile int32_t g_last_free_story_life_type = 0;
+static volatile uint32_t g_last_free_story_life_battle_trans_id = 0;
+static volatile int32_t g_last_free_story_life_chap_id = 0;
 static volatile float g_last_move_progress_speed = 0.0f;
 static volatile float g_last_move_progress_scaled = 0.0f;
 static volatile int32_t g_last_move_progress_steps = 0;
@@ -1383,7 +1402,8 @@ static void resolve_runtime_field_offsets() {
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_inited, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "inited");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValue");
     RESOLVE_VALUE_FIELD_OFFSET(g_off_obscured_vector3_fake_active, "CodeStage.AntiCheat.ObscuredTypes", "ObscuredVector3", "fakeValueActive");
-    RESOLVE_FIELD_OFFSET(g_off_localsave_userinfo_key, "", "LocalSave.UserInfo", "<Key>k__BackingField");
+    // Optional for free_story_freeze_key; the SetKey hook falls back to passthrough if this fails.
+    resolve_field_offset_by_metadata("", "LocalSave.UserInfo", "<Key>k__BackingField", &g_off_localsave_userinfo_key);
 
 #undef RESOLVE_VALUE_FIELD_OFFSET
 #undef RESOLVE_FIELD_OFFSET
@@ -1660,6 +1680,7 @@ static const HookSpec kHookSpecs[] = {
     {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr},
     {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr},
     {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr},
+    {rva::NetManager_SendInternal_Object, "", "NetManager", "SendInternal", 3, nullptr},
     {rva::GameLogic_send_use_key, "", "GameLogic", "send_use_key", 0, nullptr},
     {rva::LocalSave_Modify_Key, "", "LocalSave", "Modify_Key", 2, nullptr},
     {rva::LocalSave_UserInfo_SetKey, "", "LocalSave.UserInfo", "SetKey", 1, nullptr},
@@ -1680,6 +1701,14 @@ static uintptr_t resolve_hook_target(uintptr_t base, uintptr_t rva_value, const 
         if (target) {
             *strategy = "metadata";
             bump(g_resolve_metadata_count);
+            return target;
+        }
+    }
+    if (rva_value == rva::NetManager_SendInternal_Object) {
+        uintptr_t target = base + rva_value;
+        if (address_in_libil2cpp_exec(target)) {
+            *strategy = "rva_generic_inst";
+            bump(g_resolve_rva_count);
             return target;
         }
     }
@@ -2190,9 +2219,26 @@ static void write_status_file_once() {
     fprintf(f, "hits.ad_skip_close=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_close));
     fprintf(f, "hits.ad_skip_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_ad_skip_passthrough));
     fprintf(f, "hits.free_story_send_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_send_blocked));
+    fprintf(f, "hits.free_story_send_original=%llu\n", static_cast<unsigned long long>(g_hit_free_story_send_original));
+    fprintf(f, "hits.free_story_life_packet_zeroed=%llu\n", static_cast<unsigned long long>(g_hit_free_story_life_packet_zeroed));
+    fprintf(f, "hits.free_story_life_packet_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_life_packet_passthrough));
     fprintf(f, "hits.free_story_modify_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_modify_blocked));
+    fprintf(f, "hits.free_story_modify_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_modify_passthrough));
+    fprintf(f, "hits.free_story_set_key_lower_attempt=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_lower_attempt));
     fprintf(f, "hits.free_story_set_key_blocked=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_blocked));
+    fprintf(f, "hits.free_story_set_key_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_set_key_passthrough));
     fprintf(f, "hits.free_story_passthrough=%llu\n", static_cast<unsigned long long>(g_hit_free_story_passthrough));
+    fprintf(f, "last.free_story_modify_delta=%lld\n", static_cast<long long>(g_last_free_story_modify_delta));
+    fprintf(f, "last.free_story_modify_over=%d\n", static_cast<int>(g_last_free_story_modify_over));
+    fprintf(f, "last.free_story_set_key_current=%d\n", static_cast<int>(g_last_free_story_set_key_current));
+    fprintf(f, "last.free_story_set_key_value=%d\n", static_cast<int>(g_last_free_story_set_key_value));
+    fprintf(f, "last.free_story_set_key_had_offset=%d\n", static_cast<int>(g_last_free_story_set_key_had_offset));
+    fprintf(f, "last.free_story_life_sendtype=%d\n", static_cast<int>(g_last_free_story_life_sendtype));
+    fprintf(f, "last.free_story_life_material_before=%d\n", static_cast<int>(g_last_free_story_life_material_before));
+    fprintf(f, "last.free_story_life_material_after=%d\n", static_cast<int>(g_last_free_story_life_material_after));
+    fprintf(f, "last.free_story_life_type=%d\n", static_cast<int>(g_last_free_story_life_type));
+    fprintf(f, "last.free_story_life_battle_trans_id=%u\n", static_cast<unsigned int>(g_last_free_story_life_battle_trans_id));
+    fprintf(f, "last.free_story_life_chap_id=%d\n", static_cast<int>(g_last_free_story_life_chap_id));
     fclose(f);
     bump(g_status_writes);
 }
@@ -2402,6 +2448,7 @@ using RewardedHighEcpmShowFn = void (*)(void* callback, int32_t source, void* me
 // nested LocalSave.UserInfo respectively. The trailing void* method pointer is
 // the hidden IL2CPP MethodInfo* argument the runtime appends to every call.
 using StaticVoidNoArgFn = void (*)(void* method);
+using NetManagerSendInternalObjectFn = void (*)(void* packet, int32_t sendtype, void* callback, void* method);
 using LocalSaveModifyKeyFn = void (*)(void* thiz, int64_t key, bool over, void* method);
 using UserInfoSetKeyFn = void (*)(void* thiz, int32_t value, void* method);
 static GetHeadShotFn g_orig_get_headshot = nullptr;
@@ -2452,8 +2499,10 @@ static AdapterShowCallbackSourceFn g_orig_wrapped_adapter_show_callback_source =
 static RewardedHighEcpmIsLoadedFn g_orig_rewarded_high_ecpm_is_loaded = nullptr;
 static RewardedHighEcpmShowFn g_orig_rewarded_high_ecpm_show = nullptr;
 static StaticVoidNoArgFn g_orig_send_use_key = nullptr;
+static NetManagerSendInternalObjectFn g_orig_netmanager_send_internal_object = nullptr;
 static LocalSaveModifyKeyFn g_orig_localsave_modify_key = nullptr;
 static UserInfoSetKeyFn g_orig_userinfo_set_key = nullptr;
+static void* g_clife_trans_packet_class = nullptr;
 static void* g_adcallback_control_class = nullptr;
 static void* g_wrappeddriver_class = nullptr;
 static void* g_combineddriver_class = nullptr;
@@ -2464,6 +2513,7 @@ static uintptr_t g_last_greed_skill_inject_entity = 0;
 static uintptr_t g_last_smart_skill_inject_entity = 0;
 static __thread bool g_applying_traversal_runtime = false;
 static __thread bool g_completing_rewarded_ad = false;
+static __thread bool g_in_free_story_send_use_key = false;
 
 static bool hero_traversal_needs_native_sync(void* entity_base, bool first_seen) {
     if (!g_field_offsets_ready || !entity_base || !is_hero_entity_base(entity_base)) return false;
@@ -3228,17 +3278,63 @@ static bool hk_wrapped_adapter_show_callback_source(void* thiz, void* callback, 
     return g_orig_wrapped_adapter_show_callback_source ? g_orig_wrapped_adapter_show_callback_source(thiz, callback, source, method) : false;
 }
 
-// Tier S.1 — swallow the outbound key-consumption packet so the server never
-// receives a play request. Side-effect: the original method's predictive local
-// deduct (Modify_Key) and its DispatchServerRequest call are both skipped, so
-// the displayed Key value never changes and there is no on-the-wire fingerprint
-// distinguishing a real Free Story play from no play at all.
+static bool scoped_life_trans_packet(void* packet) {
+    if (!packet || !g_in_free_story_send_use_key) return false;
+    if (!g_clife_trans_packet_class) return true;
+    return is_instance_of_class(packet, g_clife_trans_packet_class);
+}
+
+static void hk_netmanager_send_internal_object(void* packet, int32_t sendtype, void* callback, void* method) {
+    if (g_enable_free_story && scoped_life_trans_packet(packet)) {
+        uint8_t* base = reinterpret_cast<uint8_t*>(packet);
+        uint16_t* material = reinterpret_cast<uint16_t*>(base + 0x2C);
+        uint8_t* type = reinterpret_cast<uint8_t*>(base + 0x2E);
+        uint32_t* battle_trans_id = reinterpret_cast<uint32_t*>(base + 0x30);
+        uint16_t* chap_id = reinterpret_cast<uint16_t*>(base + 0x34);
+
+        g_last_free_story_life_sendtype = sendtype;
+        g_last_free_story_life_material_before = *material;
+        g_last_free_story_life_type = *type;
+        g_last_free_story_life_battle_trans_id = *battle_trans_id;
+        g_last_free_story_life_chap_id = *chap_id;
+
+        if (*type == 1 && *material > 0) {
+            *material = 0;
+            bump(g_hit_free_story_life_packet_zeroed);
+            LOGD("FreeStory CLifeTransPacket zeroed sendtype=%d type=%u material=%d->0 battleTrans=%u chap=%u",
+                 sendtype, static_cast<unsigned>(*type),
+                 static_cast<int>(g_last_free_story_life_material_before),
+                 static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+        } else {
+            bump(g_hit_free_story_life_packet_passthrough);
+            LOGD("FreeStory CLifeTransPacket passthrough sendtype=%d type=%u material=%u battleTrans=%u chap=%u",
+                 sendtype, static_cast<unsigned>(*type), static_cast<unsigned>(*material),
+                 static_cast<unsigned>(*battle_trans_id), static_cast<unsigned>(*chap_id));
+        }
+        g_last_free_story_life_material_after = *material;
+    }
+
+    if (g_orig_netmanager_send_internal_object) {
+        g_orig_netmanager_send_internal_object(packet, sendtype, callback, method);
+    }
+}
+
+// Tier S.1 — preserve the original battle-start path but make its life/key
+// transaction zero-cost. Blocking send_use_key entirely preserves keys but also
+// prevents the server from seeing a battle start, so completed stage progress
+// gets overwritten by the old server state on next login.
 static void hk_send_use_key(void* method) {
     if (g_enable_free_story) {
-        bump(g_hit_free_story_send_blocked);
+        bump(g_hit_free_story_send_original);
+        LOGD("FreeStory send_use_key original with zero-cost life transaction");
+        bool previous = g_in_free_story_send_use_key;
+        g_in_free_story_send_use_key = true;
+        if (g_orig_send_use_key) g_orig_send_use_key(method);
+        g_in_free_story_send_use_key = previous;
         return;
     }
     bump(g_hit_free_story_passthrough);
+    LOGD("FreeStory send_use_key passthrough");
     if (g_orig_send_use_key) g_orig_send_use_key(method);
 }
 
@@ -3247,10 +3343,20 @@ static void hk_send_use_key(void* method) {
 // that tries to predictively deduct Keys also no-ops. Positive deltas (Ad/Buy
 // refills, shop grants) still pass through untouched.
 static void hk_localsave_modify_key(void* thiz, int64_t key, bool over, void* method) {
-    if (g_enable_free_story_skip_predictive && key < 0) {
+    g_last_free_story_modify_delta = key;
+    g_last_free_story_modify_over = over ? 1 : 0;
+    bool block_predictive = key < 0 &&
+        (g_enable_free_story_skip_predictive || (g_enable_free_story && g_in_free_story_send_use_key));
+    if (block_predictive) {
         bump(g_hit_free_story_modify_blocked);
+        LOGD("FreeStory Modify_Key blocked delta=%lld over=%d scoped=%d",
+             static_cast<long long>(key), over ? 1 : 0,
+             (g_enable_free_story && g_in_free_story_send_use_key) ? 1 : 0);
         return;
     }
+    bump(g_hit_free_story_modify_passthrough);
+    LOGD("FreeStory Modify_Key passthrough delta=%lld over=%d",
+         static_cast<long long>(key), over ? 1 : 0);
     if (g_orig_localsave_modify_key) g_orig_localsave_modify_key(thiz, key, over, method);
 }
 
@@ -3261,14 +3367,28 @@ static void hk_localsave_modify_key(void* thiz, int64_t key, bool over, void* me
 // real gains. Falls back to passthrough if the Key field offset failed to
 // resolve, so a metadata regression cannot accidentally permanent-freeze keys.
 static void hk_userinfo_set_key(void* thiz, int32_t value, void* method) {
-    if (g_enable_free_story_freeze_key && thiz && g_off_localsave_userinfo_key) {
-        int32_t current = *reinterpret_cast<int32_t*>(
+    bool have_current = thiz && g_off_localsave_userinfo_key;
+    int32_t current = 0;
+    if (have_current) {
+        current = *reinterpret_cast<int32_t*>(
             reinterpret_cast<uint8_t*>(thiz) + g_off_localsave_userinfo_key);
+    }
+    g_last_free_story_set_key_current = current;
+    g_last_free_story_set_key_value = value;
+    g_last_free_story_set_key_had_offset = have_current ? 1 : 0;
+    if (have_current && value < current) {
+        bump(g_hit_free_story_set_key_lower_attempt);
+    }
+    if (g_enable_free_story_freeze_key && have_current) {
         if (value < current) {
             bump(g_hit_free_story_set_key_blocked);
+            LOGD("FreeStory SetKey blocked current=%d value=%d", current, value);
             return;
         }
     }
+    bump(g_hit_free_story_set_key_passthrough);
+    LOGD("FreeStory SetKey passthrough current=%d value=%d have_current=%d",
+         current, value, have_current ? 1 : 0);
     if (g_orig_userinfo_set_key) g_orig_userinfo_set_key(thiz, value, method);
 }
 
@@ -4050,6 +4170,7 @@ static void* hack_thread(void*) {
     resolve_traversal_helpers(il2cpp_base);
     resolve_movement_helpers(il2cpp_base);
     resolve_ad_helpers(il2cpp_base);
+    g_clife_trans_packet_class = resolve_class_by_metadata_name("GameProtocol", "CLifeTransPacket");
     HOOK_FN(il2cpp_base, rva::EntityData_GetHeadShot, hk_get_headshot, g_orig_get_headshot);
     HOOK_FN(il2cpp_base, rva::EntityData_GetMiss, hk_get_miss, g_orig_get_miss);
     HOOK_FN(il2cpp_base, rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, hk_get_atk_base, g_orig_get_atk_base);
@@ -4085,6 +4206,7 @@ static void* hack_thread(void*) {
     HOOK_FN(il2cpp_base, rva::AdsRequestHelper_rewarded_high_eCPM_show, hk_rewarded_high_ecpm_show, g_orig_rewarded_high_ecpm_show);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_get_timeScale, hk_time_get_scale, g_orig_time_get_scale);
     HOOK_FN(il2cpp_base, rva::UnityEngine_Time_set_timeScale, hk_time_set_scale, g_orig_time_set_scale);
+    HOOK_FN(il2cpp_base, rva::NetManager_SendInternal_Object, hk_netmanager_send_internal_object, g_orig_netmanager_send_internal_object);
     HOOK_FN(il2cpp_base, rva::GameLogic_send_use_key, hk_send_use_key, g_orig_send_use_key);
     HOOK_FN(il2cpp_base, rva::LocalSave_Modify_Key, hk_localsave_modify_key, g_orig_localsave_modify_key);
     HOOK_FN(il2cpp_base, rva::LocalSave_UserInfo_SetKey, hk_userinfo_set_key, g_orig_userinfo_set_key);
