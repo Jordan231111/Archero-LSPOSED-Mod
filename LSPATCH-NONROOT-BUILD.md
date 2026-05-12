@@ -21,8 +21,8 @@ Current rebuilt 7.9.1 output:
 
 ```text
 /Users/jordan/Documents/temp/archerodecompiled/dist/lspatch_archero_7.9.1_xapk/archero_7.9.1_lspatched_full.apks
-SHA-256: 6482d9a238e44d84541e42b74205e90a5a2d3b6c0a0b29252f4b4d9474730961
-Embedded module: assets/lspatch/modules/com.archero.mod.apk, 281098 bytes
+SHA-256: 611b6e7aff92117fce91c8dcf834a7f4731a195dce75160ff7fad294b5f9d590
+Embedded module: assets/lspatch/modules/com.archero.mod.apk, 275690 bytes
 Split signing digest: c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d
 ```
 

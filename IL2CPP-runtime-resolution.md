@@ -18,13 +18,13 @@ Use this runtime policy:
 3. Fail closed when a method, helper, or field cannot be identified.
 4. Runtime dumpers as operator tooling for protected updates, not as the normal launch path.
 
-This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same metadata resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, `field_resolver.metadata`, `field_resolver.fallback`, `field_resolver.fail`, `field_offsets_ready`, and direct-patch counters. There is no Lua loader or Lua file in this flow. The AOB/xref/RVA counters are retained for status compatibility and should stay at zero in this metadata-only build.
+This is now implemented in the native module. `install_hook()` resolves through `resolve_hook_target()`, optional 8-byte direct patches use the same metadata resolver before writing code, and status output exposes `il2cpp_metadata_ready`, `il2cpp_metadata_wait_ms`, `startup_hooks_ready`, `resolver.metadata`, `resolver.aob`, `resolver.xref`, `resolver.rva`, `resolver.fail`, `resolver.last_error`, `field_resolver.metadata`, `field_resolver.fallback`, `field_resolver.fail`, `field_offsets_ready`, and direct-patch counters. There is no Lua loader or Lua file in this flow. The AOB/xref/RVA counters are retained for status compatibility and should stay at zero in this metadata-only build; the native source no longer carries byte-signature or string-xref resolver fields.
 
 ## Technique Survey
 
 **Byte / AOB signatures in `libil2cpp.so`**
 
-Pros: works without metadata names, survives ASLR, useful when names are stripped/obfuscated, easy to cache per hook. Cons: sensitive to compiler output, Unity version, optimization changes, and branch/call target movement. For ARM64 IL2CPP, wildcard PC-relative and relocation-sensitive instructions: `ADRP`, `ADD` forming addresses, `LDR` from global tables, `B/BL`, and conditional branches if the compiler may reorder blocks. Prefer 24-64 bytes around stable data-flow, not just function prologues. Validate uniqueness over executable ranges and reject ambiguous matches. The current module keeps scanner code only as research scaffolding; runtime hook installation does not fall back to AOB signatures.
+Pros: works without metadata names and survives ASLR. Cons: sensitive to compiler output, Unity version, optimization changes, and branch/call target movement. The current module does not use this technique and does not keep AOB signature strings in the hook table.
 
 **IL2CPP metadata-driven resolution**
 
@@ -32,7 +32,7 @@ Pros: best normal path for this target. Class and method names are much more sta
 
 **String-xref anchoring**
 
-Pros: stable when a unique string is retained, especially Unity icall names, logging strings, error strings, and format strings. Cons: not every gameplay method has a durable literal; ARM64 xref recovery must decode `ADRP/ADD` or literal loads; strings can move or be stripped. The current module keeps ARM64 string-xref scanner code only as research scaffolding; runtime hook installation does not fall back to string xrefs.
+Pros: stable when a unique string is retained, especially Unity icall names, logging strings, error strings, and format strings. Cons: not every gameplay method has a durable literal; ARM64 xref recovery must decode `ADRP/ADD` or literal loads; strings can move or be stripped. The current module does not use this technique and does not keep string-xref anchors in the hook table.
 
 **Vtable / RGCTX index resolution**
 
@@ -72,7 +72,7 @@ for each hook:
 
 ## Files Changed
 
-- `archero_mod/app/src/main/cpp/mod.cpp`: metadata resolver stack, hook spec table, readiness-based metadata wait, research-only AOB/string-xref scanners, always-on gameplay hooks, status counters.
+- `archero_mod/app/src/main/cpp/mod.cpp`: metadata resolver stack, hook spec table, readiness-based metadata wait, always-on gameplay hooks, status counters.
 - `archero_mod/app/src/main/cpp/CMakeLists.txt`: links `dl` for `dlopen`/`dlsym`.
 
 ## Current Always-On Startup Hooks
