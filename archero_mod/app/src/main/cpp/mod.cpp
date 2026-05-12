@@ -406,8 +406,6 @@ static volatile uint64_t g_status_writes = 0;
 static volatile uint64_t g_hook_installed_count = 0;
 static volatile uint64_t g_hook_skipped_tiny_count = 0;
 static volatile uint64_t g_resolve_metadata_count = 0;
-static volatile uint64_t g_resolve_aob_count = 0;
-static volatile uint64_t g_resolve_xref_count = 0;
 static volatile uint64_t g_resolve_rva_count = 0;
 static volatile uint64_t g_resolve_fail_count = 0;
 static volatile uint64_t g_field_resolve_metadata_count = 0;
@@ -772,8 +770,6 @@ struct HookSpec {
     const char* method;
     int arg_count;
     const char* first_param_type;
-    const char* aob;
-    const char* xref_anchor;
 };
 
 struct Il2CppApi {
@@ -915,160 +911,6 @@ static bool address_in_libil2cpp_exec(uintptr_t addr) {
         if (segments[i].executable && addr >= segments[i].start && addr < segments[i].end) return true;
     }
     return false;
-}
-
-static int hex_nibble(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-static bool parse_aob(const char* text, uint8_t* bytes, uint8_t* mask, size_t* out_len) {
-    if (!text || !bytes || !mask || !out_len) return false;
-    size_t len = 0;
-    const char* p = text;
-    while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
-        if (!*p) break;
-        if (len >= 128) return false;
-        if (*p == '?') {
-            bytes[len] = 0;
-            mask[len] = 0;
-            len++;
-            p++;
-            if (*p == '?') p++;
-            continue;
-        }
-        int hi = hex_nibble(p[0]);
-        int lo = hex_nibble(p[1]);
-        if (hi < 0 || lo < 0) return false;
-        bytes[len] = static_cast<uint8_t>((hi << 4) | lo);
-        mask[len] = 0xff;
-        len++;
-        p += 2;
-    }
-    *out_len = len;
-    return len > 0;
-}
-
-static bool aob_matches(const uint8_t* hay, const uint8_t* bytes, const uint8_t* mask, size_t len) {
-    for (size_t i = 0; i < len; ++i) {
-        if (mask[i] && hay[i] != bytes[i]) return false;
-    }
-    return true;
-}
-
-static uintptr_t resolve_by_aob(const HookSpec& spec) {
-    uint8_t bytes[128];
-    uint8_t mask[128];
-    size_t len = 0;
-    if (!parse_aob(spec.aob, bytes, mask, &len)) return 0;
-
-    ModuleSegment segments[16];
-    int count = read_module_segments("libil2cpp.so", segments, 16);
-    uintptr_t found = 0;
-    int matches = 0;
-    for (int i = 0; i < count; ++i) {
-        if (!segments[i].executable || segments[i].end <= segments[i].start + len) continue;
-        const uint8_t* start = reinterpret_cast<const uint8_t*>(segments[i].start);
-        size_t span = segments[i].end - segments[i].start - len;
-        for (size_t off = 0; off <= span; off += 4) {
-            if (aob_matches(start + off, bytes, mask, len)) {
-                found = segments[i].start + off;
-                matches++;
-                if (matches > 1) return 0;
-            }
-        }
-    }
-    return matches == 1 ? found : 0;
-}
-
-static uintptr_t find_bytes_in_readable_libil2cpp(const char* needle) {
-    if (!needle || !needle[0]) return 0;
-    size_t len = strlen(needle) + 1;
-    ModuleSegment segments[16];
-    int count = read_module_segments("libil2cpp.so", segments, 16);
-    for (int i = 0; i < count; ++i) {
-        if (!segments[i].readable || segments[i].executable || segments[i].end <= segments[i].start + len) continue;
-        const uint8_t* start = reinterpret_cast<const uint8_t*>(segments[i].start);
-        size_t span = segments[i].end - segments[i].start - len;
-        for (size_t off = 0; off <= span; ++off) {
-            if (memcmp(start + off, needle, len) == 0) return segments[i].start + off;
-        }
-    }
-    return 0;
-}
-
-static int64_t sign_extend(int64_t value, int bits) {
-    int64_t shift = 64 - bits;
-    return (value << shift) >> shift;
-}
-
-static bool decode_adrp(uintptr_t pc, uint32_t insn, int* reg, uintptr_t* page) {
-    if ((insn & 0x9f000000u) != 0x90000000u) return false;
-    int64_t immlo = (insn >> 29) & 0x3;
-    int64_t immhi = (insn >> 5) & 0x7ffff;
-    int64_t imm = sign_extend((immhi << 2) | immlo, 21) << 12;
-    *reg = static_cast<int>(insn & 0x1f);
-    *page = (pc & ~static_cast<uintptr_t>(0xfff)) + static_cast<uintptr_t>(imm);
-    return true;
-}
-
-static bool decode_add_imm(uint32_t insn, int base_reg, uintptr_t base, uintptr_t* value) {
-    if ((insn & 0xffc00000u) != 0x91000000u) return false;
-    int rd = static_cast<int>(insn & 0x1f);
-    int rn = static_cast<int>((insn >> 5) & 0x1f);
-    if (rd != base_reg || rn != base_reg) return false;
-    uintptr_t imm = static_cast<uintptr_t>((insn >> 10) & 0xfff);
-    if ((insn >> 22) & 1u) imm <<= 12;
-    *value = base + imm;
-    return true;
-}
-
-static bool likely_function_start(uint32_t insn) {
-    if ((insn & 0xffc003ffu) == 0xd10003ffu) return true; // sub sp, sp, #imm
-    if ((insn & 0xff0003ffu) == 0xa90003feu) return true; // stp x30, xN, [sp, ...]
-    if ((insn & 0xffffffe0u) == 0xfc1c0fe0u) return true; // str dN, [sp, #-imm]!
-    if ((insn & 0xffffffe0u) == 0x6dbc23e0u) return true; // stp dN, dM, [sp, #-imm]!
-    return false;
-}
-
-static uintptr_t resolve_by_string_xref(const HookSpec& spec) {
-    uintptr_t string_addr = find_bytes_in_readable_libil2cpp(spec.xref_anchor);
-    if (!string_addr) return 0;
-
-    ModuleSegment segments[16];
-    int count = read_module_segments("libil2cpp.so", segments, 16);
-    uintptr_t found = 0;
-    int matches = 0;
-    for (int i = 0; i < count; ++i) {
-        if (!segments[i].executable || segments[i].end <= segments[i].start + 16) continue;
-        uint32_t* code = reinterpret_cast<uint32_t*>(segments[i].start);
-        size_t words = (segments[i].end - segments[i].start) / sizeof(uint32_t);
-        for (size_t w = 0; w + 4 < words; ++w) {
-            int reg = -1;
-            uintptr_t page = 0;
-            uintptr_t pc = segments[i].start + w * sizeof(uint32_t);
-            if (!decode_adrp(pc, code[w], &reg, &page)) continue;
-            for (size_t j = 1; j <= 4 && w + j < words; ++j) {
-                uintptr_t value = 0;
-                if (!decode_add_imm(code[w + j], reg, page, &value) || value != string_addr) continue;
-                uintptr_t start = pc;
-                for (size_t back = 0; back < 64 && w >= back; ++back) {
-                    uint32_t prev = code[w - back];
-                    if (likely_function_start(prev)) {
-                        start = segments[i].start + (w - back) * sizeof(uint32_t);
-                        break;
-                    }
-                }
-                found = start;
-                matches++;
-                if (matches > 1) return 0;
-            }
-        }
-    }
-    return matches == 1 ? found : 0;
 }
 
 static uintptr_t normalize_dynamic_ptr(uintptr_t ptr, uintptr_t base, uintptr_t lo, uintptr_t hi) {
@@ -1447,7 +1289,7 @@ static void* resolve_class_by_metadata_name(const char* namespaze, const char* k
         "mscorlib.dll",
         nullptr
     };
-    HookSpec spec = {0, namespaze ? namespaze : "", klass, nullptr, 0, nullptr, nullptr, nullptr};
+    HookSpec spec = {0, namespaze ? namespaze : "", klass, nullptr, 0, nullptr};
     if (g_il2cpp_api.domain_get_assemblies) {
         size_t assembly_count = 0;
         void** assemblies = g_il2cpp_api.domain_get_assemblies(nullptr, &assembly_count);
@@ -1609,268 +1451,268 @@ static void resolve_runtime_field_offsets() {
 }
 
 static const HookSpec kHookSpecs[] = {
-    {rva::GameModeBase_GetGoldRatio, "", "GameModeBase", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeBase_GetDropDataGold, "", "GameModeBase", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperation_GetGoldRatio, "", "GameModeCooperation", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperation_GetDropDataGold, "", "GameModeCooperation", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperationPVP_GetGoldRatio, "", "GameModeCooperationPVP", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperationPVP_GetDropDataGold, "", "GameModeCooperationPVP", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeDaily_GetGoldRatio, "", "GameModeDaily", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeDaily_GetDropDataGold, "", "GameModeDaily", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeGold1_GetGoldRatio, "", "GameModeGold1", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeGold1_GetDropDataGold, "", "GameModeGold1", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeLevel_GetGoldRatio, "", "GameModeLevel", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeLevel_GetDropDataGold, "", "GameModeLevel", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeMainChallenge_GetGoldRatio, "", "GameModeMainChallenge", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeMainChallenge_GetDropDataGold, "", "GameModeMainChallenge", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeMeadowBattle_GetGoldRatio, "", "GameModeMeadowBattle", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeMeadowBattle_GetDropDataGold, "", "GameModeMeadowBattle", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeTower_GetGoldRatio, "", "GameModeTower", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeTower_GetDropDataGold, "", "GameModeTower", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameModeTryPlay_GetGoldRatio, "", "GameModeTryPlay", "GetGoldRatio", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeTryPlay_GetDropDataGold, "", "GameModeTryPlay", "GetDropDataGold", 1, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomLevel, "", "DropManager", "GetRandomLevel", 4, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomGoldHitted, "", "DropManager", "GetRandomGoldHitted", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetActivityProp, "", "DropManager", "GetActivityProp", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetStone, "", "DropManager", "GetStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetBloodStone, "", "DropManager", "GetBloodStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomFetterBadge, "", "DropManager", "GetRandomFetterBadge", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomSkillStone, "", "DropManager", "GetRandomSkillStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetWishCoin, "", "DropManager", "GetWishCoin", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetModstone, "", "DropManager", "GetModstone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetCommonItem, "", "DropManager", "GetCommonItem", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetDropMat, "", "DropManager", "GetDropMat", 3, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRuneStone, "", "DropManager", "GetRuneStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetCookie, "", "DropManager", "GetCookie", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetAdventureCoin, "", "DropManager", "GetAdventureCoin", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetLoupeDrops, "", "DropManager", "GetLoupeDrops", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetManorMat, "", "DropManager", "GetManorMat", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetSoulStone, "", "DropManager", "GetSoulStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetBone, "", "DropManager", "GetBone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetHorn, "", "DropManager", "GetHorn", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomEquipExp, "", "DropManager", "GetRandomEquipExp", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomMagicStone, "", "DropManager", "GetRandomMagicStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomDragonCoin, "", "DropManager", "GetRandomDragonCoin", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomStarLightStone, "", "DropManager", "GetRandomStarLightStone", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetRandomEquip, "", "DropManager", "GetRandomEquip", 4, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetDropIds, "", "DropManager", "GetDropIds", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetEquipQuintessence, "", "DropManager", "GetEquipQuintessence", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetNewPlay125BagCoin, "", "DropManager", "GetNewPlay125BagCoin", 2, nullptr, nullptr, nullptr},
-    {rva::DropManager_getTotalCnt_WithCondition, "", "DropManager", "getTotalCnt", 2, "1:System.Func", nullptr, nullptr},
-    {rva::DropManager_getTotalCnt_WithEquipOne, "", "DropManager", "getTotalCnt", 2, "1:EquipOne", nullptr, nullptr},
-    {rva::DropManager_CanGetMoreDrop, "", "DropManager", "CanGetMoreDrop", 1, nullptr, nullptr, nullptr},
-    {rva::DropManager_AppendDropCount, "", "DropManager", "AppendDropCount", 1, nullptr, nullptr, nullptr},
-    {rva::DeadGoodMgr_GetGoldNum, "", "DeadGoodMgr", "GetGoldNum", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleInBase_CanDropEquip, "", "LocalSave.BattleInBase", "CanDropEquip", 1, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleIn_CanDropEquip, "", "LocalSave", "BattleIn_CanDropEquip", 1, nullptr, nullptr, nullptr},
-    {rva::LocalSave_get_CanDropType501Equip, "", "LocalSave", "get_CanDropType501Equip", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_get_CanDropType401Or402Equip, "", "LocalSave", "get_CanDropType401Or402Equip", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_get_CanDropFirstEquip, "", "LocalSave", "get_CanDropFirstEquip", 0, nullptr, nullptr, nullptr},
-    {rva::BattleModuleData_BuildCheatData, "", "BattleModuleData", "BuildCheatData", 0, nullptr, nullptr, nullptr},
-    {rva::HTTPSendClient_CheckGameOverCheat, "", "HTTPSendClient", "CheckGameOverCheat", 1, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleIn_DropEquipByServer, "", "LocalSave", "get_BattleIn_DropEquipByServer", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleIn_DropEquipDataByTransId, "", "LocalSave", "BattleIn_DropEquipDataByTransId", 1, nullptr, nullptr, nullptr},
-    {rva::GameOverModeCtrlBase_CheckDropEquipsByServer, "", "GameOverModeCtrlBase", "CheckDropEquipsByServer", 1, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetEquipMaxDrop, "", "IStageLayerManager", "GetEquipMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetMPMaxDrop, "", "IStageLayerManager", "GetMPMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetScrollMaxDrop, "", "IStageLayerManager", "GetScrollMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetRuneStoneMaxDrop, "", "IStageLayerManager", "GetRuneStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetAdventureCoinsMaxDrop, "", "IStageLayerManager", "GetAdventureCoinsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetLoupeMaxDrop, "", "IStageLayerManager", "GetLoupeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetStoneMaxDrop, "", "IStageLayerManager", "GetStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetBloodStoneMaxDrop, "", "IStageLayerManager", "GetBloodStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetSkillStoneMaxDrop, "", "IStageLayerManager", "GetSkillStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetFetterBadgeMaxDrop, "", "IStageLayerManager", "GetFetterBadgeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetCommonItemMaxDrop, "", "IStageLayerManager", "GetCommonItemMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetAct4thItemsMaxDrop, "", "IStageLayerManager", "GetAct4thItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetAct4thExchangeItemsMaxDrop, "", "IStageLayerManager", "GetAct4thExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetWishCoinMaxDrop, "", "IStageLayerManager", "GetWishCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetActivityPropMaxDrop, "", "IStageLayerManager", "GetActivityPropMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetCookieMaxDrop, "", "IStageLayerManager", "GetCookieMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetSoulStoneMaxDrop, "", "IStageLayerManager", "GetSoulStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetHonorStoneMaxDrop, "", "IStageLayerManager", "GetHonorStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetBoneMaxDrop, "", "IStageLayerManager", "GetBoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetHornMaxDrop, "", "IStageLayerManager", "GetHornMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetSoulPointMaxDrop, "", "IStageLayerManager", "GetSoulPointMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetMagicStoneMaxDrop, "", "IStageLayerManager", "GetMagicStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetDragonCoinMaxDrop, "", "IStageLayerManager", "GetDragonCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetStarLightStoneMaxDrop, "", "IStageLayerManager", "GetStarLightStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetModstoneMaxDrop, "", "IStageLayerManager", "GetModstoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetManorMatMaxDrop, "", "IStageLayerManager", "GetManorMatMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetFountainUseMaxDrop, "", "IStageLayerManager", "GetFountainUseMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetFountainUpgradeMaxDrop, "", "IStageLayerManager", "GetFountainUpgradeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetEquipQuintessenceMaxDrop, "", "IStageLayerManager", "GetEquipQuintessenceMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetChineseKnotMaxDrop, "", "IStageLayerManager", "GetChineseKnotMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetFirecrackerMaxDrop, "", "IStageLayerManager", "GetFirecrackerMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetPetLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetPetLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetPetExchangeItemsMaxDrop, "", "IStageLayerManager", "GetPetExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetArtifactExchangeItemsMaxDrop, "", "IStageLayerManager", "GetArtifactExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetImprintLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetImprintLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetImprintExchangeItemsMaxDrop, "", "IStageLayerManager", "GetImprintExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetImprintStoneItemsMaxDrop, "", "IStageLayerManager", "GetImprintStoneItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetPropMaxDropById, "", "IStageLayerManager", "GetPropMaxDropById", 1, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetWingLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetWingLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetAct5DonateItemsMaxDrop, "", "IStageLayerManager", "GetAct5DonateItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetNewPlay125BagCoinMaxDrop, "", "IStageLayerManager", "GetNewPlay125BagCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::IStageLayerManager_GetShipUpgradeMaxDrop, "", "IStageLayerManager", "GetShipUpgradeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetEquipMaxDrop, "", "StageLevelManager", "GetEquipMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetMPMaxDrop, "", "StageLevelManager", "GetMPMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetScrollMaxDrop, "", "StageLevelManager", "GetScrollMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetRuneStoneMaxDrop, "", "StageLevelManager", "GetRuneStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetActivityPropMaxDrop, "", "StageLevelManager", "GetActivityPropMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetCookieMaxDrop, "", "StageLevelManager", "GetCookieMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetSoulStoneMaxDrop, "", "StageLevelManager", "GetSoulStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetHonorStoneMaxDrop, "", "StageLevelManager", "GetHonorStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetBoneMaxDrop, "", "StageLevelManager", "GetBoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetHornMaxDrop, "", "StageLevelManager", "GetHornMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetStoneMaxDrop, "", "StageLevelManager", "GetStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetBloodStoneMaxDrop, "", "StageLevelManager", "GetBloodStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetFetterBadgeMaxDrop, "", "StageLevelManager", "GetFetterBadgeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetAct4thItemsMaxDrop, "", "StageLevelManager", "GetAct4thItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetAct4thExchangeItemsMaxDrop, "", "StageLevelManager", "GetAct4thExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetMagicStoneMaxDrop, "", "StageLevelManager", "GetMagicStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetStarLightStoneMaxDrop, "", "StageLevelManager", "GetStarLightStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetFountainUseMaxDrop, "", "StageLevelManager", "GetFountainUseMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetFountainUpgradeMaxDrop, "", "StageLevelManager", "GetFountainUpgradeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetChineseKnotMaxDrop, "", "StageLevelManager", "GetChineseKnotMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetFirecrackerMaxDrop, "", "StageLevelManager", "GetFirecrackerMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetLoupeMaxDrop, "", "StageLevelManager", "GetLoupeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetEquipQuintessenceMaxDrop, "", "StageLevelManager", "GetEquipQuintessenceMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetPetLevelUpItemsMaxDrop, "", "StageLevelManager", "GetPetLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetPetExchangeItemsMaxDrop, "", "StageLevelManager", "GetPetExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetArtifactExchangeItemsMaxDrop, "", "StageLevelManager", "GetArtifactExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetImprintLevelUpItemsMaxDrop, "", "StageLevelManager", "GetImprintLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetImprintExchangeItemsMaxDrop, "", "StageLevelManager", "GetImprintExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetImprintStoneItemsMaxDrop, "", "StageLevelManager", "GetImprintStoneItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetWingLevelUpItemsMaxDrop, "", "StageLevelManager", "GetWingLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetAct5DonateItemsMaxDrop, "", "StageLevelManager", "GetAct5DonateItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetPropMaxDropById, "", "StageLevelManager", "GetPropMaxDropById", 1, nullptr, nullptr, nullptr},
-    {rva::SailingBagBattleStageLayerManager_GetNewPlay125BagCoinMaxDrop, "", "SailingBagBattleStageLayerManager", "GetNewPlay125BagCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeBase_GetAdventureCoinMaxDrop, "", "GameModeBase", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeBase_GetNewPlay125BagCoinMaxDrop, "", "GameModeBase", "GetNewPlay125BagCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperation_GetAdventureCoinMaxDrop, "", "GameModeCooperation", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeCooperationPVP_GetAdventureCoinMaxDrop, "", "GameModeCooperationPVP", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeDaily_GetAdventureCoinMaxDrop, "", "GameModeDaily", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeGold1_GetAdventureCoinMaxDrop, "", "GameModeGold1", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeLevel_GetAdventureCoinMaxDrop, "", "GameModeLevel", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeMainChallenge_GetAdventureCoinMaxDrop, "", "GameModeMainChallenge", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeSailingBagBattle_GetNewPlay125BagCoinMaxDrop, "", "GameModeSailingBagBattle", "GetNewPlay125BagCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::GameModeTower_GetAdventureCoinMaxDrop, "", "GameModeTower", "GetAdventureCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_DailyChapter_get_AdventureCoinRateMax, "TableTool", "Daily_DailyChapter", "get_AdventureCoinRateMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_DailyChapter_get_BagCoinMax, "TableTool", "Daily_DailyChapter", "get_BagCoinMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_PVEStage_get_GoldMax, "TableTool", "PVEStage_stagechapter", "get_GoldMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_PVEStage_get_HardGoldMax, "TableTool", "PVEStage_stagechapter", "get_Hard_GoldMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_ShipStage_get_BagCoinMax, "TableTool", "ShipStage_BagDifficulty", "get_BagCoinMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_SLGStage_get_GoldMax, "TableTool", "SLGStage_stagechapter", "get_GoldMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_SLGBaseLevel_get_GoldMax, "TableTool", "SLG_BaseLevel", "get_GoldMax", 0, nullptr, nullptr, nullptr},
-    {rva::TableTool_TowerDefense_get_GoldMAX, "TableTool", "Tower_Defense_TDlevel", "get_GoldMAX", 0, nullptr, nullptr, nullptr},
-    {rva::SailingBagBattleStageLayerManager_GetCommonItemMaxDrop, "", "SailingBagBattleStageLayerManager", "GetCommonItemMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::SailingBagBattleStageLayerManager_GetShipUpgradeMaxDrop, "", "SailingBagBattleStageLayerManager", "GetShipUpgradeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::CampBattleStageLayerManager_GetEquipMaxDrop, "", "CampBattleStageLayerManager", "GetEquipMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::CampBattleStageLayerManager_GetStoneMaxDrop, "", "CampBattleStageLayerManager", "GetStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::CampBattleStageLayerManager_GetSkillStoneMaxDrop, "", "CampBattleStageLayerManager", "GetSkillStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetScrollMaxDrop, "", "DailyActivity.DailyStageChapter", "GetScrollMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetAdventureCoinsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAdventureCoinsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetLoupeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetLoupeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetBoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetBoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetHornMaxDrop, "", "DailyActivity.DailyStageChapter", "GetHornMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetRuneStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetRuneStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetActivityPropMaxDrop, "", "DailyActivity.DailyStageChapter", "GetActivityPropMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetCookieMaxDrop, "", "DailyActivity.DailyStageChapter", "GetCookieMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetSoulStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetSoulStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetHonorStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetHonorStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetEquipMaxDrop, "", "DailyActivity.DailyStageChapter", "GetEquipMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetBloodStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetBloodStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetFetterBadgeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFetterBadgeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetAct4thItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAct4thItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetAct4thExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAct4thExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetWishCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetWishCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetMagicStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetMagicStoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetDragonCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetDragonCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetModstoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetModstoneMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetManorMatMaxDrop, "", "DailyActivity.DailyStageChapter", "GetManorMatMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetFountainUseMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFountainUseMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetFountainUpgradeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFountainUpgradeMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetCommonItemMaxDrop, "", "DailyActivity.DailyStageChapter", "GetCommonItemMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetEquipQuintessenceMaxDrop, "", "DailyActivity.DailyStageChapter", "GetEquipQuintessenceMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetChineseKnotMaxDrop, "", "DailyActivity.DailyStageChapter", "GetChineseKnotMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetFirecrackerMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFirecrackerMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetPetLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetPetLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetPetExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetPetExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetArtifactExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetArtifactExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetImprintLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetImprintExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintExchangeItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetImprintStoneItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintStoneItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetWingLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetWingLevelUpItemsMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetNewPlay125BagCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetNewPlay125BagCoinMaxDrop", 0, nullptr, nullptr, nullptr},
-    {rva::DailyStageChapter_GetPropMaxDropById, "", "DailyActivity.DailyStageChapter", "GetPropMaxDropById", 1, nullptr, nullptr, nullptr},
-    {rva::BattleModuleData_AddGold_Float, "", "BattleModuleData", "AddGold", 1, "System.Single", nullptr, nullptr},
-    {rva::BattleModuleData_AddGold_Int, "", "BattleModuleData", "AddGold", 1, "System.Int32", nullptr, nullptr},
-    {rva::BattleModuleData_GetGold, "", "BattleModuleData", "GetGold", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleIn_GetGold, "", "LocalSave", "BattleIn_GetGold", 0, nullptr, nullptr, nullptr},
-    {rva::LocalSave_BattleIn_UpdateGold, "", "LocalSave", "BattleIn_UpdateGold", 1, nullptr, nullptr, nullptr},
-    {rva::EntityData_getGold, "", "EntityData", "getGold", 1, nullptr, nullptr, nullptr},
-    {rva::GameConfig_GetCoin1Wave, "", "GameConfig", "GetCoin1Wave", 0, nullptr, nullptr, nullptr},
-    {rva::GameConfig_GetBoxDropGold, "", "GameConfig", "GetBoxDropGold", 0, nullptr, nullptr, nullptr},
-    {rva::GameConfig_GetBoxChooseGold, "", "GameConfig", "GetBoxChooseGold", 1, nullptr, nullptr, nullptr},
-    {rva::Drop_DropModel_GetGoldDropPercent, "TableTool", "Drop_DropModel", "GetGoldDropPercent", 0, nullptr, nullptr, nullptr},
-    {rva::Drop_DropModel_GetDropGold, "TableTool", "Drop_DropModel", "GetDropGold", 1, nullptr, nullptr, nullptr},
-    {rva::DeadGoodMgr_StartDrop, "", "DeadGoodMgr", "StartDrop", 4, nullptr, nullptr, nullptr},
-    {rva::DropManager_GetDropList, "", "DropManager", "GetDropList", 0, nullptr, nullptr, nullptr},
-    {rva::DropGold_OnGetHittedList, "", "DropGold", "OnGetHittedList", 1, nullptr, nullptr, nullptr},
-    {rva::DropGold_OnGetDropDead, "", "DropGold", "OnGetDropDead", 0, nullptr, nullptr, nullptr},
-    {rva::GameLogic_GetPureGoldList, "", "GameLogic", "GetPureGoldList", 1, nullptr, nullptr, nullptr},
-    {rva::GameLogic_CanSaveGoldInRealTime, "", "GameLogic", "CanSaveGoldInRealTime", 0, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetGoldDropPercent, "", "StageLevelManager", "GetGoldDropPercent", 1, nullptr, nullptr, nullptr},
-    {rva::StageLevelManager_GetFreeGold, "", "StageLevelManager", "GetFreeGold", 0, nullptr, nullptr, nullptr},
-    {rva::EntityData_GetHeadShot, "", "EntityData", "GetHeadShot", 2, nullptr, "FC 1C 0F E8 F9 00 07 FE A9 01 5F F8 A9 02 57 F6 A9 03 4F F4 ?? ?? ?? ?? 39 61 82 C8 AA 02 03 F5 AA 01 03 F3 AA 00 03 F4 37 ?? ?? ??", nullptr},
-    {rva::EntityData_GetMiss, "", "EntityData", "GetMiss", 1, nullptr, "6D BC 23 E9 F9 00 0B FE A9 02 57 F6 A9 03 4F F4 ?? ?? ?? ?? 39 60 32 A8 AA 01 03 F3 AA 00 03 F4 37 ?? ?? ??", nullptr},
-    {rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, "TableTool", "PlayerCharacter_UpgradeModel", "GetATKBase", 1, nullptr, "FF 43 01 D1 FE 67 01 A9 F8 5F 02 A9 F6 57 03 A9 F4 4F 04 A9 ?? ?? ?? ?? 88 F6 42 39 F3 03 01 2A 37 ?? ?? ??", nullptr},
-    {rva::TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase, "TableTool", "PlayerCharacter_UpgradeModel", "GetHPMaxBase", 1, nullptr, "FF 43 01 D1 FE 67 01 A9 F8 5F 02 A9 F6 57 03 A9 F4 4F 04 A9 ?? ?? ?? ?? 88 FA 42 39 F3 03 01 2A 37 ?? ?? ??", nullptr},
-    {rva::TableTool_Weapon_weapon_get_Speed, "TableTool", "Weapon_weapon", "get_Speed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 50 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
-    {rva::TableTool_Weapon_weapon_get_AttackSpeed, "TableTool", "Weapon_weapon", "get_AttackSpeed", 0, nullptr, "FF C3 00 D1 FE 13 00 F9 08 B0 04 91 09 09 40 F9 00 01 C0 3D E0 03 00 91 E1 03 1F AA", nullptr},
-    {rva::TableTool_Weapon_weapon_get_bThroughWall, "TableTool", "Weapon_weapon", "get_bThroughWall", 0, nullptr, "FE 4F BF A9 F3 03 00 AA ?? ?? ?? ?? 60 1A 4D 39 FE 4F C1 A8 C0 03 5F D6", nullptr},
-    {rva::TableTool_Weapon_weapon_get_bThroughInsideWall, "TableTool", "Weapon_weapon", "get_bThroughInsideWall", 0, nullptr, nullptr, nullptr},
-    {rva::BulletTransmit_Init_Simple, "", "BulletTransmit", "Init", 4, "EntityBase", nullptr, nullptr},
-    {rva::BulletTransmit_Init_Full, "", "BulletTransmit", "Init", 8, "EntityBase", nullptr, nullptr},
-    {rva::BulletTransmit_get_ThroughWall, "", "BulletTransmit", "get_ThroughWall", 0, nullptr, nullptr, nullptr},
-    {rva::BulletBase_HitWall, "", "BulletBase", "HitWall", 1, "UnityEngine.Collider", nullptr, nullptr},
-    {rva::BulletBase_TriggerEnter1_HitWallInternal, "", "BulletBase", "<TriggerEnter1>g__HitWallInternal|337_0", 1, nullptr, nullptr, nullptr},
-    {rva::EntityBase_SetFlyWater, "", "EntityBase", "SetFlyWater", 1, nullptr, nullptr, nullptr},
-    {rva::EntityBase_GetFlyWater, "", "EntityBase", "GetFlyWater", 0, nullptr, nullptr, nullptr},
-    {rva::EntityBase_SetFlyStone, "", "EntityBase", "SetFlyStone", 1, nullptr, nullptr, nullptr},
-    {rva::EntityBase_GetOnCalCanMove, "", "EntityBase", "get_OnCalCanMove", 0, nullptr, nullptr, nullptr},
-    {rva::EntityBase_SetCollider, "", "EntityBase", "SetCollider", 1, nullptr, nullptr, nullptr},
-    {rva::EntityBase_SetFlyAll, "", "EntityBase", "SetFlyAll", 1, nullptr, nullptr, nullptr},
-    {rva::EntityBase_CheckPos, "", "EntityBase", "check_pos", 1, "UnityEngine.Vector3", nullptr, nullptr},
-    {rva::EntityBase_SelfMoveBy, "", "EntityBase", "SelfMoveBy", 1, "UnityEngine.Vector3", nullptr, nullptr},
-    {rva::EntityBase_AddSkill, "", "EntityBase", "AddSkill", 1, "System.Int32", nullptr, nullptr},
-    {rva::EntityBase_ContainsSkill, "", "EntityBase", "ContainsSkill", 1, "System.Int32", nullptr, nullptr},
-    {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr, nullptr, nullptr},
-    {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr, nullptr, nullptr},
-    {rva::MoveControl_UpdateProgress, "", "MoveControl", "UpdateProgress", 0, nullptr, nullptr, nullptr},
-    {rva::AdCallbackControl_IsLoaded, "", "AdCallbackControl", "IsLoaded", 1, nullptr, nullptr, nullptr},
-    {rva::AdCallbackControl_Show, "", "AdCallbackControl", "Show", 1, nullptr, nullptr, nullptr},
-    {rva::AdCallbackControl_onClose, "", "AdCallbackControl", "onClose", 2, nullptr, nullptr, nullptr},
-    {rva::AdCallbackControl_onReward, "", "AdCallbackControl", "onReward", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_ALMaxRewardedDriver_isLoaded, "", "AdsRequestHelper.ALMaxRewardedDriver", "isLoaded", 0, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_ALMaxRewardedDriver_Show, "", "AdsRequestHelper.ALMaxRewardedDriver", "Show", 0, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedDriver_onClose, "", "AdsRequestHelper.WrappedDriver", "onClose", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedDriver_onReward, "", "AdsRequestHelper.WrappedDriver", "onReward", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_CombinedDriver_onClose, "", "AdsRequestHelper.CombinedDriver", "onClose", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_CombinedDriver_onReward, "", "AdsRequestHelper.CombinedDriver", "onReward", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_CallbackRouter_onClose, "", "AdsRequestHelper.CallbackRouter", "onClose", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_CallbackRouter_onReward, "", "AdsRequestHelper.CallbackRouter", "onReward", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedAdapter_isLoaded, "", "AdsRequestHelper.WrappedAdapter", "isLoaded", 0, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedAdapter_Show, "", "AdsRequestHelper.WrappedAdapter", "Show", 0, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback, "", "AdsRequestHelper.WrappedAdapter", "Show", 1, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, "", "AdsRequestHelper.WrappedAdapter", "Show", 2, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, "", "AdsRequestHelper", "rewarded_high_eCPM_isLoaded", 0, nullptr, nullptr, nullptr},
-    {rva::AdsRequestHelper_rewarded_high_eCPM_show, "", "AdsRequestHelper", "rewarded_high_eCPM_show", 2, nullptr, nullptr, nullptr},
-    {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr, nullptr, nullptr},
-    {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr, "FE 4F BF A9 ?? ?? ?? ?? 60 2E 46 F9 A0 00 00 B5 ?? ?? ?? ?? 00 B4 06 91 ?? ?? ?? ?? 60 2E 06 F9 FE 4F C1 A8 00 00 1F D6", "UnityEngine.Time::get_timeScale()"},
-    {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr, "E8 0F 1E FC FE 4F 01 A9 ?? ?? ?? ?? 60 32 46 F9 08 1C A0 4E A0 00 00 B5 ?? ?? ?? ?? 00 F0 0F 91 ?? ?? ?? ?? 60 32 06 F9", "UnityEngine.Time::set_timeScale(System.Single)"},
+    {rva::GameModeBase_GetGoldRatio, "", "GameModeBase", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeBase_GetDropDataGold, "", "GameModeBase", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeCooperation_GetGoldRatio, "", "GameModeCooperation", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeCooperation_GetDropDataGold, "", "GameModeCooperation", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeCooperationPVP_GetGoldRatio, "", "GameModeCooperationPVP", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeCooperationPVP_GetDropDataGold, "", "GameModeCooperationPVP", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeDaily_GetGoldRatio, "", "GameModeDaily", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeDaily_GetDropDataGold, "", "GameModeDaily", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeGold1_GetGoldRatio, "", "GameModeGold1", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeGold1_GetDropDataGold, "", "GameModeGold1", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeLevel_GetGoldRatio, "", "GameModeLevel", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeLevel_GetDropDataGold, "", "GameModeLevel", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeMainChallenge_GetGoldRatio, "", "GameModeMainChallenge", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeMainChallenge_GetDropDataGold, "", "GameModeMainChallenge", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeMeadowBattle_GetGoldRatio, "", "GameModeMeadowBattle", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeMeadowBattle_GetDropDataGold, "", "GameModeMeadowBattle", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeTower_GetGoldRatio, "", "GameModeTower", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeTower_GetDropDataGold, "", "GameModeTower", "GetDropDataGold", 1, nullptr},
+    {rva::GameModeTryPlay_GetGoldRatio, "", "GameModeTryPlay", "GetGoldRatio", 0, nullptr},
+    {rva::GameModeTryPlay_GetDropDataGold, "", "GameModeTryPlay", "GetDropDataGold", 1, nullptr},
+    {rva::DropManager_GetRandomLevel, "", "DropManager", "GetRandomLevel", 4, nullptr},
+    {rva::DropManager_GetRandomGoldHitted, "", "DropManager", "GetRandomGoldHitted", 2, nullptr},
+    {rva::DropManager_GetActivityProp, "", "DropManager", "GetActivityProp", 2, nullptr},
+    {rva::DropManager_GetStone, "", "DropManager", "GetStone", 2, nullptr},
+    {rva::DropManager_GetBloodStone, "", "DropManager", "GetBloodStone", 2, nullptr},
+    {rva::DropManager_GetRandomFetterBadge, "", "DropManager", "GetRandomFetterBadge", 2, nullptr},
+    {rva::DropManager_GetRandomSkillStone, "", "DropManager", "GetRandomSkillStone", 2, nullptr},
+    {rva::DropManager_GetWishCoin, "", "DropManager", "GetWishCoin", 2, nullptr},
+    {rva::DropManager_GetModstone, "", "DropManager", "GetModstone", 2, nullptr},
+    {rva::DropManager_GetCommonItem, "", "DropManager", "GetCommonItem", 2, nullptr},
+    {rva::DropManager_GetDropMat, "", "DropManager", "GetDropMat", 3, nullptr},
+    {rva::DropManager_GetRuneStone, "", "DropManager", "GetRuneStone", 2, nullptr},
+    {rva::DropManager_GetCookie, "", "DropManager", "GetCookie", 2, nullptr},
+    {rva::DropManager_GetAdventureCoin, "", "DropManager", "GetAdventureCoin", 2, nullptr},
+    {rva::DropManager_GetLoupeDrops, "", "DropManager", "GetLoupeDrops", 2, nullptr},
+    {rva::DropManager_GetManorMat, "", "DropManager", "GetManorMat", 2, nullptr},
+    {rva::DropManager_GetSoulStone, "", "DropManager", "GetSoulStone", 2, nullptr},
+    {rva::DropManager_GetBone, "", "DropManager", "GetBone", 2, nullptr},
+    {rva::DropManager_GetHorn, "", "DropManager", "GetHorn", 2, nullptr},
+    {rva::DropManager_GetRandomEquipExp, "", "DropManager", "GetRandomEquipExp", 2, nullptr},
+    {rva::DropManager_GetRandomMagicStone, "", "DropManager", "GetRandomMagicStone", 2, nullptr},
+    {rva::DropManager_GetRandomDragonCoin, "", "DropManager", "GetRandomDragonCoin", 2, nullptr},
+    {rva::DropManager_GetRandomStarLightStone, "", "DropManager", "GetRandomStarLightStone", 2, nullptr},
+    {rva::DropManager_GetRandomEquip, "", "DropManager", "GetRandomEquip", 4, nullptr},
+    {rva::DropManager_GetDropIds, "", "DropManager", "GetDropIds", 2, nullptr},
+    {rva::DropManager_GetEquipQuintessence, "", "DropManager", "GetEquipQuintessence", 2, nullptr},
+    {rva::DropManager_GetNewPlay125BagCoin, "", "DropManager", "GetNewPlay125BagCoin", 2, nullptr},
+    {rva::DropManager_getTotalCnt_WithCondition, "", "DropManager", "getTotalCnt", 2, "1:System.Func"},
+    {rva::DropManager_getTotalCnt_WithEquipOne, "", "DropManager", "getTotalCnt", 2, "1:EquipOne"},
+    {rva::DropManager_CanGetMoreDrop, "", "DropManager", "CanGetMoreDrop", 1, nullptr},
+    {rva::DropManager_AppendDropCount, "", "DropManager", "AppendDropCount", 1, nullptr},
+    {rva::DeadGoodMgr_GetGoldNum, "", "DeadGoodMgr", "GetGoldNum", 0, nullptr},
+    {rva::LocalSave_BattleInBase_CanDropEquip, "", "LocalSave.BattleInBase", "CanDropEquip", 1, nullptr},
+    {rva::LocalSave_BattleIn_CanDropEquip, "", "LocalSave", "BattleIn_CanDropEquip", 1, nullptr},
+    {rva::LocalSave_get_CanDropType501Equip, "", "LocalSave", "get_CanDropType501Equip", 0, nullptr},
+    {rva::LocalSave_get_CanDropType401Or402Equip, "", "LocalSave", "get_CanDropType401Or402Equip", 0, nullptr},
+    {rva::LocalSave_get_CanDropFirstEquip, "", "LocalSave", "get_CanDropFirstEquip", 0, nullptr},
+    {rva::BattleModuleData_BuildCheatData, "", "BattleModuleData", "BuildCheatData", 0, nullptr},
+    {rva::HTTPSendClient_CheckGameOverCheat, "", "HTTPSendClient", "CheckGameOverCheat", 1, nullptr},
+    {rva::LocalSave_BattleIn_DropEquipByServer, "", "LocalSave", "get_BattleIn_DropEquipByServer", 0, nullptr},
+    {rva::LocalSave_BattleIn_DropEquipDataByTransId, "", "LocalSave", "BattleIn_DropEquipDataByTransId", 1, nullptr},
+    {rva::GameOverModeCtrlBase_CheckDropEquipsByServer, "", "GameOverModeCtrlBase", "CheckDropEquipsByServer", 1, nullptr},
+    {rva::IStageLayerManager_GetEquipMaxDrop, "", "IStageLayerManager", "GetEquipMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetMPMaxDrop, "", "IStageLayerManager", "GetMPMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetScrollMaxDrop, "", "IStageLayerManager", "GetScrollMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetRuneStoneMaxDrop, "", "IStageLayerManager", "GetRuneStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetAdventureCoinsMaxDrop, "", "IStageLayerManager", "GetAdventureCoinsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetLoupeMaxDrop, "", "IStageLayerManager", "GetLoupeMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetStoneMaxDrop, "", "IStageLayerManager", "GetStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetBloodStoneMaxDrop, "", "IStageLayerManager", "GetBloodStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetSkillStoneMaxDrop, "", "IStageLayerManager", "GetSkillStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetFetterBadgeMaxDrop, "", "IStageLayerManager", "GetFetterBadgeMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetCommonItemMaxDrop, "", "IStageLayerManager", "GetCommonItemMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetAct4thItemsMaxDrop, "", "IStageLayerManager", "GetAct4thItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetAct4thExchangeItemsMaxDrop, "", "IStageLayerManager", "GetAct4thExchangeItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetWishCoinMaxDrop, "", "IStageLayerManager", "GetWishCoinMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetActivityPropMaxDrop, "", "IStageLayerManager", "GetActivityPropMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetCookieMaxDrop, "", "IStageLayerManager", "GetCookieMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetSoulStoneMaxDrop, "", "IStageLayerManager", "GetSoulStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetHonorStoneMaxDrop, "", "IStageLayerManager", "GetHonorStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetBoneMaxDrop, "", "IStageLayerManager", "GetBoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetHornMaxDrop, "", "IStageLayerManager", "GetHornMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetSoulPointMaxDrop, "", "IStageLayerManager", "GetSoulPointMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetMagicStoneMaxDrop, "", "IStageLayerManager", "GetMagicStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetDragonCoinMaxDrop, "", "IStageLayerManager", "GetDragonCoinMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetStarLightStoneMaxDrop, "", "IStageLayerManager", "GetStarLightStoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetModstoneMaxDrop, "", "IStageLayerManager", "GetModstoneMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetManorMatMaxDrop, "", "IStageLayerManager", "GetManorMatMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetFountainUseMaxDrop, "", "IStageLayerManager", "GetFountainUseMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetFountainUpgradeMaxDrop, "", "IStageLayerManager", "GetFountainUpgradeMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetEquipQuintessenceMaxDrop, "", "IStageLayerManager", "GetEquipQuintessenceMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetChineseKnotMaxDrop, "", "IStageLayerManager", "GetChineseKnotMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetFirecrackerMaxDrop, "", "IStageLayerManager", "GetFirecrackerMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetPetLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetPetLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetPetExchangeItemsMaxDrop, "", "IStageLayerManager", "GetPetExchangeItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetArtifactExchangeItemsMaxDrop, "", "IStageLayerManager", "GetArtifactExchangeItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetImprintLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetImprintLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetImprintExchangeItemsMaxDrop, "", "IStageLayerManager", "GetImprintExchangeItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetImprintStoneItemsMaxDrop, "", "IStageLayerManager", "GetImprintStoneItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetPropMaxDropById, "", "IStageLayerManager", "GetPropMaxDropById", 1, nullptr},
+    {rva::IStageLayerManager_GetWingLevelUpItemsMaxDrop, "", "IStageLayerManager", "GetWingLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetAct5DonateItemsMaxDrop, "", "IStageLayerManager", "GetAct5DonateItemsMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetNewPlay125BagCoinMaxDrop, "", "IStageLayerManager", "GetNewPlay125BagCoinMaxDrop", 0, nullptr},
+    {rva::IStageLayerManager_GetShipUpgradeMaxDrop, "", "IStageLayerManager", "GetShipUpgradeMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetEquipMaxDrop, "", "StageLevelManager", "GetEquipMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetMPMaxDrop, "", "StageLevelManager", "GetMPMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetScrollMaxDrop, "", "StageLevelManager", "GetScrollMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetRuneStoneMaxDrop, "", "StageLevelManager", "GetRuneStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetActivityPropMaxDrop, "", "StageLevelManager", "GetActivityPropMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetCookieMaxDrop, "", "StageLevelManager", "GetCookieMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetSoulStoneMaxDrop, "", "StageLevelManager", "GetSoulStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetHonorStoneMaxDrop, "", "StageLevelManager", "GetHonorStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetBoneMaxDrop, "", "StageLevelManager", "GetBoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetHornMaxDrop, "", "StageLevelManager", "GetHornMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetStoneMaxDrop, "", "StageLevelManager", "GetStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetBloodStoneMaxDrop, "", "StageLevelManager", "GetBloodStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetFetterBadgeMaxDrop, "", "StageLevelManager", "GetFetterBadgeMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetAct4thItemsMaxDrop, "", "StageLevelManager", "GetAct4thItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetAct4thExchangeItemsMaxDrop, "", "StageLevelManager", "GetAct4thExchangeItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetMagicStoneMaxDrop, "", "StageLevelManager", "GetMagicStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetStarLightStoneMaxDrop, "", "StageLevelManager", "GetStarLightStoneMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetFountainUseMaxDrop, "", "StageLevelManager", "GetFountainUseMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetFountainUpgradeMaxDrop, "", "StageLevelManager", "GetFountainUpgradeMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetChineseKnotMaxDrop, "", "StageLevelManager", "GetChineseKnotMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetFirecrackerMaxDrop, "", "StageLevelManager", "GetFirecrackerMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetLoupeMaxDrop, "", "StageLevelManager", "GetLoupeMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetEquipQuintessenceMaxDrop, "", "StageLevelManager", "GetEquipQuintessenceMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetPetLevelUpItemsMaxDrop, "", "StageLevelManager", "GetPetLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetPetExchangeItemsMaxDrop, "", "StageLevelManager", "GetPetExchangeItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetArtifactExchangeItemsMaxDrop, "", "StageLevelManager", "GetArtifactExchangeItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetImprintLevelUpItemsMaxDrop, "", "StageLevelManager", "GetImprintLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetImprintExchangeItemsMaxDrop, "", "StageLevelManager", "GetImprintExchangeItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetImprintStoneItemsMaxDrop, "", "StageLevelManager", "GetImprintStoneItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetWingLevelUpItemsMaxDrop, "", "StageLevelManager", "GetWingLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetAct5DonateItemsMaxDrop, "", "StageLevelManager", "GetAct5DonateItemsMaxDrop", 0, nullptr},
+    {rva::StageLevelManager_GetPropMaxDropById, "", "StageLevelManager", "GetPropMaxDropById", 1, nullptr},
+    {rva::SailingBagBattleStageLayerManager_GetNewPlay125BagCoinMaxDrop, "", "SailingBagBattleStageLayerManager", "GetNewPlay125BagCoinMaxDrop", 0, nullptr},
+    {rva::GameModeBase_GetAdventureCoinMaxDrop, "", "GameModeBase", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeBase_GetNewPlay125BagCoinMaxDrop, "", "GameModeBase", "GetNewPlay125BagCoinMaxDrop", 0, nullptr},
+    {rva::GameModeCooperation_GetAdventureCoinMaxDrop, "", "GameModeCooperation", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeCooperationPVP_GetAdventureCoinMaxDrop, "", "GameModeCooperationPVP", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeDaily_GetAdventureCoinMaxDrop, "", "GameModeDaily", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeGold1_GetAdventureCoinMaxDrop, "", "GameModeGold1", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeLevel_GetAdventureCoinMaxDrop, "", "GameModeLevel", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeMainChallenge_GetAdventureCoinMaxDrop, "", "GameModeMainChallenge", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::GameModeSailingBagBattle_GetNewPlay125BagCoinMaxDrop, "", "GameModeSailingBagBattle", "GetNewPlay125BagCoinMaxDrop", 0, nullptr},
+    {rva::GameModeTower_GetAdventureCoinMaxDrop, "", "GameModeTower", "GetAdventureCoinMaxDrop", 0, nullptr},
+    {rva::TableTool_DailyChapter_get_AdventureCoinRateMax, "TableTool", "Daily_DailyChapter", "get_AdventureCoinRateMax", 0, nullptr},
+    {rva::TableTool_DailyChapter_get_BagCoinMax, "TableTool", "Daily_DailyChapter", "get_BagCoinMax", 0, nullptr},
+    {rva::TableTool_PVEStage_get_GoldMax, "TableTool", "PVEStage_stagechapter", "get_GoldMax", 0, nullptr},
+    {rva::TableTool_PVEStage_get_HardGoldMax, "TableTool", "PVEStage_stagechapter", "get_Hard_GoldMax", 0, nullptr},
+    {rva::TableTool_ShipStage_get_BagCoinMax, "TableTool", "ShipStage_BagDifficulty", "get_BagCoinMax", 0, nullptr},
+    {rva::TableTool_SLGStage_get_GoldMax, "TableTool", "SLGStage_stagechapter", "get_GoldMax", 0, nullptr},
+    {rva::TableTool_SLGBaseLevel_get_GoldMax, "TableTool", "SLG_BaseLevel", "get_GoldMax", 0, nullptr},
+    {rva::TableTool_TowerDefense_get_GoldMAX, "TableTool", "Tower_Defense_TDlevel", "get_GoldMAX", 0, nullptr},
+    {rva::SailingBagBattleStageLayerManager_GetCommonItemMaxDrop, "", "SailingBagBattleStageLayerManager", "GetCommonItemMaxDrop", 0, nullptr},
+    {rva::SailingBagBattleStageLayerManager_GetShipUpgradeMaxDrop, "", "SailingBagBattleStageLayerManager", "GetShipUpgradeMaxDrop", 0, nullptr},
+    {rva::CampBattleStageLayerManager_GetEquipMaxDrop, "", "CampBattleStageLayerManager", "GetEquipMaxDrop", 0, nullptr},
+    {rva::CampBattleStageLayerManager_GetStoneMaxDrop, "", "CampBattleStageLayerManager", "GetStoneMaxDrop", 0, nullptr},
+    {rva::CampBattleStageLayerManager_GetSkillStoneMaxDrop, "", "CampBattleStageLayerManager", "GetSkillStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetScrollMaxDrop, "", "DailyActivity.DailyStageChapter", "GetScrollMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetAdventureCoinsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAdventureCoinsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetLoupeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetLoupeMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetBoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetBoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetHornMaxDrop, "", "DailyActivity.DailyStageChapter", "GetHornMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetRuneStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetRuneStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetActivityPropMaxDrop, "", "DailyActivity.DailyStageChapter", "GetActivityPropMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetCookieMaxDrop, "", "DailyActivity.DailyStageChapter", "GetCookieMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetSoulStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetSoulStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetHonorStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetHonorStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetEquipMaxDrop, "", "DailyActivity.DailyStageChapter", "GetEquipMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetBloodStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetBloodStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetFetterBadgeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFetterBadgeMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetAct4thItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAct4thItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetAct4thExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetAct4thExchangeItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetWishCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetWishCoinMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetMagicStoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetMagicStoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetDragonCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetDragonCoinMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetModstoneMaxDrop, "", "DailyActivity.DailyStageChapter", "GetModstoneMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetManorMatMaxDrop, "", "DailyActivity.DailyStageChapter", "GetManorMatMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetFountainUseMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFountainUseMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetFountainUpgradeMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFountainUpgradeMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetCommonItemMaxDrop, "", "DailyActivity.DailyStageChapter", "GetCommonItemMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetEquipQuintessenceMaxDrop, "", "DailyActivity.DailyStageChapter", "GetEquipQuintessenceMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetChineseKnotMaxDrop, "", "DailyActivity.DailyStageChapter", "GetChineseKnotMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetFirecrackerMaxDrop, "", "DailyActivity.DailyStageChapter", "GetFirecrackerMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetPetLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetPetLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetPetExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetPetExchangeItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetArtifactExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetArtifactExchangeItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetImprintLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetImprintExchangeItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintExchangeItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetImprintStoneItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetImprintStoneItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetWingLevelUpItemsMaxDrop, "", "DailyActivity.DailyStageChapter", "GetWingLevelUpItemsMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetNewPlay125BagCoinMaxDrop, "", "DailyActivity.DailyStageChapter", "GetNewPlay125BagCoinMaxDrop", 0, nullptr},
+    {rva::DailyStageChapter_GetPropMaxDropById, "", "DailyActivity.DailyStageChapter", "GetPropMaxDropById", 1, nullptr},
+    {rva::BattleModuleData_AddGold_Float, "", "BattleModuleData", "AddGold", 1, "System.Single"},
+    {rva::BattleModuleData_AddGold_Int, "", "BattleModuleData", "AddGold", 1, "System.Int32"},
+    {rva::BattleModuleData_GetGold, "", "BattleModuleData", "GetGold", 0, nullptr},
+    {rva::LocalSave_BattleIn_GetGold, "", "LocalSave", "BattleIn_GetGold", 0, nullptr},
+    {rva::LocalSave_BattleIn_UpdateGold, "", "LocalSave", "BattleIn_UpdateGold", 1, nullptr},
+    {rva::EntityData_getGold, "", "EntityData", "getGold", 1, nullptr},
+    {rva::GameConfig_GetCoin1Wave, "", "GameConfig", "GetCoin1Wave", 0, nullptr},
+    {rva::GameConfig_GetBoxDropGold, "", "GameConfig", "GetBoxDropGold", 0, nullptr},
+    {rva::GameConfig_GetBoxChooseGold, "", "GameConfig", "GetBoxChooseGold", 1, nullptr},
+    {rva::Drop_DropModel_GetGoldDropPercent, "TableTool", "Drop_DropModel", "GetGoldDropPercent", 0, nullptr},
+    {rva::Drop_DropModel_GetDropGold, "TableTool", "Drop_DropModel", "GetDropGold", 1, nullptr},
+    {rva::DeadGoodMgr_StartDrop, "", "DeadGoodMgr", "StartDrop", 4, nullptr},
+    {rva::DropManager_GetDropList, "", "DropManager", "GetDropList", 0, nullptr},
+    {rva::DropGold_OnGetHittedList, "", "DropGold", "OnGetHittedList", 1, nullptr},
+    {rva::DropGold_OnGetDropDead, "", "DropGold", "OnGetDropDead", 0, nullptr},
+    {rva::GameLogic_GetPureGoldList, "", "GameLogic", "GetPureGoldList", 1, nullptr},
+    {rva::GameLogic_CanSaveGoldInRealTime, "", "GameLogic", "CanSaveGoldInRealTime", 0, nullptr},
+    {rva::StageLevelManager_GetGoldDropPercent, "", "StageLevelManager", "GetGoldDropPercent", 1, nullptr},
+    {rva::StageLevelManager_GetFreeGold, "", "StageLevelManager", "GetFreeGold", 0, nullptr},
+    {rva::EntityData_GetHeadShot, "", "EntityData", "GetHeadShot", 2, nullptr},
+    {rva::EntityData_GetMiss, "", "EntityData", "GetMiss", 1, nullptr},
+    {rva::TableTool_PlayerCharacter_UpgradeModel_GetATKBase, "TableTool", "PlayerCharacter_UpgradeModel", "GetATKBase", 1, nullptr},
+    {rva::TableTool_PlayerCharacter_UpgradeModel_GetHPMaxBase, "TableTool", "PlayerCharacter_UpgradeModel", "GetHPMaxBase", 1, nullptr},
+    {rva::TableTool_Weapon_weapon_get_Speed, "TableTool", "Weapon_weapon", "get_Speed", 0, nullptr},
+    {rva::TableTool_Weapon_weapon_get_AttackSpeed, "TableTool", "Weapon_weapon", "get_AttackSpeed", 0, nullptr},
+    {rva::TableTool_Weapon_weapon_get_bThroughWall, "TableTool", "Weapon_weapon", "get_bThroughWall", 0, nullptr},
+    {rva::TableTool_Weapon_weapon_get_bThroughInsideWall, "TableTool", "Weapon_weapon", "get_bThroughInsideWall", 0, nullptr},
+    {rva::BulletTransmit_Init_Simple, "", "BulletTransmit", "Init", 4, "EntityBase"},
+    {rva::BulletTransmit_Init_Full, "", "BulletTransmit", "Init", 8, "EntityBase"},
+    {rva::BulletTransmit_get_ThroughWall, "", "BulletTransmit", "get_ThroughWall", 0, nullptr},
+    {rva::BulletBase_HitWall, "", "BulletBase", "HitWall", 1, "UnityEngine.Collider"},
+    {rva::BulletBase_TriggerEnter1_HitWallInternal, "", "BulletBase", "<TriggerEnter1>g__HitWallInternal|337_0", 1, nullptr},
+    {rva::EntityBase_SetFlyWater, "", "EntityBase", "SetFlyWater", 1, nullptr},
+    {rva::EntityBase_GetFlyWater, "", "EntityBase", "GetFlyWater", 0, nullptr},
+    {rva::EntityBase_SetFlyStone, "", "EntityBase", "SetFlyStone", 1, nullptr},
+    {rva::EntityBase_GetOnCalCanMove, "", "EntityBase", "get_OnCalCanMove", 0, nullptr},
+    {rva::EntityBase_SetCollider, "", "EntityBase", "SetCollider", 1, nullptr},
+    {rva::EntityBase_SetFlyAll, "", "EntityBase", "SetFlyAll", 1, nullptr},
+    {rva::EntityBase_CheckPos, "", "EntityBase", "check_pos", 1, "UnityEngine.Vector3"},
+    {rva::EntityBase_SelfMoveBy, "", "EntityBase", "SelfMoveBy", 1, "UnityEngine.Vector3"},
+    {rva::EntityBase_AddSkill, "", "EntityBase", "AddSkill", 1, "System.Int32"},
+    {rva::EntityBase_ContainsSkill, "", "EntityBase", "ContainsSkill", 1, "System.Int32"},
+    {rva::EntityBase_AddInitSkills, "", "EntityBase", "AddInitSkills", 0, nullptr},
+    {rva::EntityHitCtrl_SetFlyOne, "", "EntityHitCtrl", "SetFlyOne", 2, nullptr},
+    {rva::MoveControl_UpdateProgress, "", "MoveControl", "UpdateProgress", 0, nullptr},
+    {rva::AdCallbackControl_IsLoaded, "", "AdCallbackControl", "IsLoaded", 1, nullptr},
+    {rva::AdCallbackControl_Show, "", "AdCallbackControl", "Show", 1, nullptr},
+    {rva::AdCallbackControl_onClose, "", "AdCallbackControl", "onClose", 2, nullptr},
+    {rva::AdCallbackControl_onReward, "", "AdCallbackControl", "onReward", 2, nullptr},
+    {rva::AdsRequestHelper_ALMaxRewardedDriver_isLoaded, "", "AdsRequestHelper.ALMaxRewardedDriver", "isLoaded", 0, nullptr},
+    {rva::AdsRequestHelper_ALMaxRewardedDriver_Show, "", "AdsRequestHelper.ALMaxRewardedDriver", "Show", 0, nullptr},
+    {rva::AdsRequestHelper_WrappedDriver_onClose, "", "AdsRequestHelper.WrappedDriver", "onClose", 2, nullptr},
+    {rva::AdsRequestHelper_WrappedDriver_onReward, "", "AdsRequestHelper.WrappedDriver", "onReward", 2, nullptr},
+    {rva::AdsRequestHelper_CombinedDriver_onClose, "", "AdsRequestHelper.CombinedDriver", "onClose", 2, nullptr},
+    {rva::AdsRequestHelper_CombinedDriver_onReward, "", "AdsRequestHelper.CombinedDriver", "onReward", 2, nullptr},
+    {rva::AdsRequestHelper_CallbackRouter_onClose, "", "AdsRequestHelper.CallbackRouter", "onClose", 2, nullptr},
+    {rva::AdsRequestHelper_CallbackRouter_onReward, "", "AdsRequestHelper.CallbackRouter", "onReward", 2, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_isLoaded, "", "AdsRequestHelper.WrappedAdapter", "isLoaded", 0, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show, "", "AdsRequestHelper.WrappedAdapter", "Show", 0, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback, "", "AdsRequestHelper.WrappedAdapter", "Show", 1, nullptr},
+    {rva::AdsRequestHelper_WrappedAdapter_Show_Callback_Source, "", "AdsRequestHelper.WrappedAdapter", "Show", 2, nullptr},
+    {rva::AdsRequestHelper_rewarded_high_eCPM_isLoaded, "", "AdsRequestHelper", "rewarded_high_eCPM_isLoaded", 0, nullptr},
+    {rva::AdsRequestHelper_rewarded_high_eCPM_show, "", "AdsRequestHelper", "rewarded_high_eCPM_show", 2, nullptr},
+    {rva::UnityEngine_Time_get_deltaTime, "UnityEngine", "Time", "get_deltaTime", 0, nullptr},
+    {rva::UnityEngine_Time_get_timeScale, "UnityEngine", "Time", "get_timeScale", 0, nullptr},
+    {rva::UnityEngine_Time_set_timeScale, "UnityEngine", "Time", "set_timeScale", 1, nullptr},
 };
 
 static const HookSpec* find_hook_spec(uintptr_t rva_value) {
@@ -2305,8 +2147,8 @@ static void write_status_file_once() {
     fprintf(f, "hook_installed_count=%llu\n", static_cast<unsigned long long>(g_hook_installed_count));
     fprintf(f, "hook_skipped_tiny_count=%llu\n", static_cast<unsigned long long>(g_hook_skipped_tiny_count));
     fprintf(f, "resolver.metadata=%llu\n", static_cast<unsigned long long>(g_resolve_metadata_count));
-    fprintf(f, "resolver.aob=%llu\n", static_cast<unsigned long long>(g_resolve_aob_count));
-    fprintf(f, "resolver.xref=%llu\n", static_cast<unsigned long long>(g_resolve_xref_count));
+    fprintf(f, "resolver.aob=0\n");
+    fprintf(f, "resolver.xref=0\n");
     fprintf(f, "resolver.rva=%llu\n", static_cast<unsigned long long>(g_resolve_rva_count));
     fprintf(f, "resolver.fail=%llu\n", static_cast<unsigned long long>(g_resolve_fail_count));
     fprintf(f, "resolver.last_error=%s\n", g_last_resolve_error);
@@ -3946,7 +3788,7 @@ static bool install_hook(uintptr_t base, uintptr_t rva_value, void* replacement,
     if (!resolved || !address_in_libil2cpp_exec(resolved)) {
         bump(g_resolve_fail_count);
         set_last_resolve_error(name, "not_executable");
-        LOGD("Unable to resolve %s by metadata/AOB/xref/RVA", name);
+        LOGD("Unable to resolve %s by metadata", name);
         return false;
     }
 
