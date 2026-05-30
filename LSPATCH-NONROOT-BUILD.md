@@ -17,7 +17,16 @@ Signer #1 certificate SHA-256:
 c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d
 ```
 
-Current rebuilt 7.9.1 output:
+Current rebuilt 7.10.1 output:
+
+```text
+/Users/jordan/Documents/temp/archerodecompiled/dist/lspatch_archero_7.10.1_xapk/archero_7.10.1_lspatched_full.apks
+SHA-256: 84004ee35cc48972d61597401523aba6bf00266464f830b5448d2fcfb4c9751a
+Embedded module: assets/lspatch/modules/com.archero.mod.apk, 150190 bytes
+Split signing digest: c081890cf2a1adf13e56d7b50a4f3d8edb35b7c46d6ccc732dd997b7e433be1d
+```
+
+Previous 7.9.1 output:
 
 ```text
 /Users/jordan/Documents/temp/archerodecompiled/dist/lspatch_archero_7.9.1_xapk/archero_7.9.1_lspatched_full.apks
@@ -37,7 +46,7 @@ tools/lspatch/lspatch.jar
 archero_mod/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-For each game update, use a complete XAPK/APKS source that contains the base APK and every required split. For Archero 7.9.1 the complete APKPure XAPK contained:
+For each game update, use a complete XAPK/APKS source that contains the base APK and every required split. For Archero 7.10.1 the complete APKPure XAPK contained:
 
 ```text
 com.habby.archero.apk
@@ -72,8 +81,8 @@ Update `VERSION` and `XAPK` for each release:
 ```bash
 cd /Users/jordan/Documents/temp/archerodecompiled
 
-export VERSION="7.9.1"
-export XAPK="/Users/jordan/Downloads/Archero_7.9.1_APKPure.xapk"
+export VERSION="7.10.1"
+export XAPK="/Users/jordan/Downloads/Archero_7.10.1_APKPure.xapk"
 export OUT="dist/lspatch_archero_${VERSION}_xapk"
 export LSPATCH="tools/lspatch/lspatch.jar"
 export MODULE_APK="archero_mod/app/build/outputs/apk/debug/app-debug.apk"

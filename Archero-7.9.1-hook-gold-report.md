@@ -9,7 +9,14 @@ Historical Lua source audited during the initial migration:
 
 The repo-local `lib/arm64-v8a/libil2cpp.so` was stale and matched the old v7.7.1 addresses. I extracted the v7.9.1 `global-metadata.dat` and `libil2cpp.so` from `/Users/jordan/Downloads/Archero_7.9.1_APKPure.xapk`, then dumped with both Il2CppDumper and Il2CppInspectorRedux.
 
-Current v7.9.1 dump anchors:
+Current v7.10.1 dump anchors:
+
+- `CodeRegistration = 0x86AE720`
+- `MetadataRegistration = 0x88F2440`
+- v7.10.1 `libil2cpp.so` SHA-256: `4fb44c39c5beedc2a417f71b0dc0ff57ad86da447e475027bc44004bced7e542`
+- v7.10.1 metadata SHA-256: `f422eec3d3241989d10fe401cf54ea7b85380289a0ca9d43f8369e7790900ba7`
+
+Previous v7.9.1 dump anchors:
 
 - `CodeRegistration = 0x86AA030`
 - `MetadataRegistration = 0x88EFF68`

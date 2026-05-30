@@ -2,7 +2,7 @@
 
 LSPosed/Xposed module for Archero (com.habby.archero) providing native IL2CPP gameplay hooks.
 
-**Target:** Archero v7.9.1 (arm64-v8a)
+**Target:** Archero v7.10.1 (arm64-v8a)
 
 ## Features
 
